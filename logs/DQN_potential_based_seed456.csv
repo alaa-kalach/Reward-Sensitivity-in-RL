@@ -1,0 +1,4 @@
+run_id,algorithm,reward_fn,seed,episode,total_steps,episode_steps,episode_reward,env_reward_sum,reached_goal,rolling_avg_10,learning_reached,wall_time
+DQN_potential_based_seed456,DQN,potential_based,456,1,200,200,-198.9624,-200.0,False,-200.0,False,0.004
+DQN_potential_based_seed456,DQN,potential_based,456,2,400,200,-198.9536,-200.0,False,-200.0,False,0.009
+DQN_potential_based_seed456,DQN,potential_based,456,3,600,200,-199.1752,-200.0,False,-200.0,False,0.015

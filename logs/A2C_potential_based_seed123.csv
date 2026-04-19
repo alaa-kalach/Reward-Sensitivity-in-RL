@@ -1,0 +1,4 @@
+run_id,algorithm,reward_fn,seed,episode,total_steps,episode_steps,episode_reward,env_reward_sum,reached_goal,rolling_avg_10,learning_reached,wall_time
+A2C_potential_based_seed123,A2C,potential_based,123,1,200,200,-198.8368,-200.0,False,-200.0,False,0.007
+A2C_potential_based_seed123,A2C,potential_based,123,2,400,200,-199.0645,-200.0,False,-200.0,False,0.013
+A2C_potential_based_seed123,A2C,potential_based,123,3,600,200,-198.9012,-200.0,False,-200.0,False,0.018

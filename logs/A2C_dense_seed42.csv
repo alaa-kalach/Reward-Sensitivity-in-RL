@@ -1,0 +1,4 @@
+run_id,algorithm,reward_fn,seed,episode,total_steps,episode_steps,episode_reward,env_reward_sum,reached_goal,rolling_avg_10,learning_reached,wall_time
+A2C_dense_seed42,A2C,dense,42,1,200,200,-14.0345,-200.0,False,-200.0,False,0.004
+A2C_dense_seed42,A2C,dense,42,2,400,200,-0.1463,-200.0,False,-200.0,False,0.009
+A2C_dense_seed42,A2C,dense,42,3,600,200,17.2164,-200.0,False,-200.0,False,0.013

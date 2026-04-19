@@ -1,0 +1,4 @@
+run_id,algorithm,reward_fn,seed,episode,total_steps,episode_steps,episode_reward,env_reward_sum,reached_goal,rolling_avg_10,learning_reached,wall_time
+DQN_dense_seed456,DQN,dense,456,1,200,200,26.0942,-200.0,False,-200.0,False,0.006
+DQN_dense_seed456,DQN,dense,456,2,400,200,25.0032,-200.0,False,-200.0,False,0.012
+DQN_dense_seed456,DQN,dense,456,3,600,200,-5.0041,-200.0,False,-200.0,False,0.018

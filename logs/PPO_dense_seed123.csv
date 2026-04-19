@@ -1,0 +1,4 @@
+run_id,algorithm,reward_fn,seed,episode,total_steps,episode_steps,episode_reward,env_reward_sum,reached_goal,rolling_avg_10,learning_reached,wall_time
+PPO_dense_seed123,PPO,dense,123,1,200,200,17.0222,-200.0,False,-200.0,False,0.003
+PPO_dense_seed123,PPO,dense,123,2,400,200,14.256,-200.0,False,-200.0,False,0.007
+PPO_dense_seed123,PPO,dense,123,3,600,200,4.1225,-200.0,False,-200.0,False,0.011
