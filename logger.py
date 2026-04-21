@@ -212,15 +212,24 @@ class ExperimentLogger:
         return summary
 
     def _write_summary(self, summary: dict) -> None:
-        """Appends this run's metrics to the shared summary.csv."""
         summary_path = os.path.join(self._logs_dir, "summary.csv")
-        file_exists  = os.path.exists(summary_path)
 
-        with open(summary_path, "a", newline="") as f:
+        # Load existing rows if file exists
+        existing_rows = []
+        if os.path.exists(summary_path):
+            with open(summary_path, "r", newline="") as f:
+                reader = csv.DictReader(f)
+                existing_rows = [
+                    row for row in reader
+                    if row["run_id"] != self.run_id  # drop old version of this run
+                ]
+
+        existing_rows.append(summary)  # add the fresh row
+
+        with open(summary_path, "w", newline="") as f:  # overwrite cleanly
             writer = csv.DictWriter(f, fieldnames=list(summary.keys()))
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(summary)
+            writer.writeheader()
+            writer.writerows(existing_rows)
 
     def __enter__(self):
         return self
