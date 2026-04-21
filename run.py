@@ -1,333 +1,276 @@
 """
 run.py
-Single entry point for Phase 1.
+Per-algorithm entry point. Each team member runs this for their own algorithm.
 
-Flow:
-  1. Smoke test  — 9 combinations, random policy, all metrics tracked
-  2. Mock eval   — placeholder success rate per run
-  3. Sensitivity analysis report printed from summary.csv
-  4. Visualization — comparative mode aligned with the study's design
+Each run covers 9 experiments:
+    3 reward functions (dense, sparse, potential_based)
+  × 3 random seeds (42, 123, 456)
 
-Visualization modes (chosen interactively):
-  A) Fix an algorithm  → watch it run under all 3 reward functions sequentially.
-     Answers: "How does reward design change this algorithm's behavior?"
+The three team members run independently:
+    python run.py --algorithm PPO
+    python run.py --algorithm DQN
+    python run.py --algorithm A2C
 
-  B) Fix a reward function → watch all 3 algorithms run under it sequentially.
-     Answers: "How differently do algorithms behave given the same reward?"
+All 9 CSVs land in logs/ with the standard naming convention
+(e.g. PPO_dense_seed42.csv) so the shared summary.csv and plot.py
+can aggregate across all three members once everyone is done.
 
-  Each episode prints a per-step breakdown and ends with a comparison table
-  across all conditions shown — directly mirroring the report structure.
+Flow per algorithm
+------------------
+  1. Training   — N_EPISODES per condition, all metrics tracked via ExperimentLogger.
+  2. Evaluation — EVAL_EPISODES post-training episodes per condition, goal-reaching counted.
+  3. Report     — Per-algorithm sensitivity summary printed from the 9 completed runs.
 
-Usage:
-    python run.py
-    python run.py --episodes 5
-    python run.py --vis-episodes 2
-    python run.py --no-visual
+Phase 2 — replacing the random policy
+--------------------------------------
+Each member implements _get_action() in their own agents/ file
+(agents/ppo.py, agents/dqn.py, agents/a2c.py) and imports it here.
+The stub below is the only line that changes between Phase 1 and Phase 2.
+
+Usage
+-----
+    python run.py --algorithm PPO
+    python run.py --algorithm DQN --episodes 300
+    python run.py --algorithm A2C --seeds 42 123
+    python run.py --algorithm PPO --episodes 200 --seeds 42
 """
 
 import argparse
-import time
-import gymnasium as gym
+import os
+import numpy as np
 
 from environment import MountainCarWrapper
 from reward_functions import REWARD_REGISTRY, get_reward_fn
 from logger import make_logger, EpisodeRecord
 from metrics import compute_sensitivity_analysis
 
-SEEDS         = [42, 123, 456]   # 3 seeds → 27 total runs (3 seeds × 3 rewards × 3 algos)
-ALGORITHMS    = ["PPO", "DQN", "A2C"]
-FRAME_DELAY   = 0.02
-EVAL_EPISODES = 20
+# -----------------------------------------------------------------------
+# Study constants
+# -----------------------------------------------------------------------
+
+ALGORITHMS     = ["PPO", "DQN", "A2C"]
+DEFAULT_SEEDS  = [42, 123, 456]
+N_EPISODES     = 5000     
+EVAL_EPISODES  = 100        # post-training evaluation episodes per condition
 
 
 # -----------------------------------------------------------------------
-# Shared: one episode, random policy, no rendering
+# Phase 2 hook — the only function each team member replaces
 # -----------------------------------------------------------------------
 
-def run_episode(env: MountainCarWrapper) -> tuple:
+def _get_action(algorithm: str, obs: np.ndarray, env: MountainCarWrapper) -> int:
+    """
+    Action selection. Phase 1 uses a random policy to validate the pipeline.
+
+    Phase 2 replacement example (in agents/ppo.py etc.):
+        from agents.ppo import PPOAgent
+        agent = PPOAgent.load("checkpoints/ppo_final.zip")
+
+        def _get_action(algorithm, obs, env):
+            return agent.predict(obs)[0]
+    """
+    return env.action_space.sample()
+
+
+# -----------------------------------------------------------------------
+# Core episode runner — shared by training and evaluation
+# -----------------------------------------------------------------------
+
+def run_episode(
+    env: MountainCarWrapper,
+    algorithm: str,
+) -> tuple[int, float, float, bool]:
+    """
+    Runs one full episode.
+
+    Returns
+    -------
+    (episode_steps, shaped_reward_sum, env_reward_sum, reached_goal)
+
+    shaped_reward_sum — what the algorithm actually experienced (for diagnostics)
+    env_reward_sum    — raw env reward, used as ground truth in all four metrics
+    """
     obs, _ = env.reset()
-    ep_reward, ep_env_reward, ep_steps, reached_goal = 0.0, 0.0, 0, False
+    ep_shaped, ep_env, steps, reached_goal = 0.0, 0.0, 0, False
 
     while True:
-        action = env.action_space.sample()
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        ep_reward     += reward
-        ep_env_reward += info["env_reward"]
-        ep_steps      += 1
+        action                                         = _get_action(algorithm, obs, env)
+        next_obs, shaped_r, terminated, truncated, info = env.step(action)
+
+        ep_shaped += shaped_r
+        ep_env    += info["env_reward"]
+        steps     += 1
+        obs        = next_obs
+
         if terminated:
             reached_goal = True
         if terminated or truncated:
             break
 
-    return ep_steps, ep_reward, ep_env_reward, reached_goal
+    return steps, ep_shaped, ep_env, reached_goal
 
 
 # -----------------------------------------------------------------------
-# Step 1 — Smoke test
+# Single condition: one (reward_fn, seed) pair for the chosen algorithm
 # -----------------------------------------------------------------------
 
-def smoke_test(n_episodes: int) -> None:
-    print("=" * 65)
-    print("  Phase 1 — Smoke Test")
-    print(f"  27 runs total  (3 seeds x 3 reward fns x 3 algorithms)")
-    print(f"  Seeds      : {SEEDS}")
-    print(f"  Threshold  : avg env_reward >= -90 over 10-episode window")
-    print(f"  Final perf : mean of last 100 episodes")
-    print(f"  Stability  : variance across seeds (computed in report)")
-    print(f"  Success    : % eval episodes reaching goal (post-train)")
-    print("=" * 65)
-
-    for seed in SEEDS:
-        print(f"\n{'=' * 65}")
-        print(f"  SEED {seed}")
-        print(f"{'=' * 65}")
-
-        for reward_name, reward_fn in REWARD_REGISTRY.items():
-            for algo in ALGORITHMS:
-                print(f"\n  [{algo} | {reward_name} | seed={seed}]")
-
-                env    = MountainCarWrapper(reward_fn=reward_fn, seed=seed)
-                logger = make_logger(algorithm=algo, reward_fn=reward_name, seed=seed)
-
-                for ep in range(1, n_episodes + 1):
-                    steps, ep_rew, env_rew, goal = run_episode(env)
-
-                    logger.log(EpisodeRecord(
-                        algorithm        = algo,
-                        reward_fn        = reward_name,
-                        seed             = seed,
-                        run_id           = logger.run_id,
-                        episode          = ep,
-                        total_steps      = 0,
-                        episode_steps    = steps,
-                        episode_reward   = round(ep_rew, 4),
-                        env_reward_sum   = round(env_rew, 4),
-                        reached_goal     = goal,
-                        rolling_avg_10   = 0.0,
-                        learning_reached = False,
-                    ))
-
-                    print(
-                        f"    ep {ep:02d} | steps={steps:4d} | "
-                        f"shaped_r={ep_rew:8.3f} | "
-                        f"env_r={env_rew:8.3f} | "
-                        f"goal={goal}"
-                    )
-
-                mock_successes = sum(
-                    1 for _ in range(EVAL_EPISODES) if run_episode(env)[3]
-                )
-                logger.record_eval_success_rate(mock_successes, EVAL_EPISODES)
-                logger.close()
-
-    print("\n" + "=" * 65)
-    print(f"  Smoke test complete. 27 CSV files written to logs/")
-    print("=" * 65)
-
-
-# -----------------------------------------------------------------------
-# Step 2 — Analysis
-# -----------------------------------------------------------------------
-
-def run_analysis() -> None:
-    compute_sensitivity_analysis()
-
-
-# -----------------------------------------------------------------------
-# Step 3 — Comparative Visualization
-# -----------------------------------------------------------------------
-
-def run_visual_episode(
-    env,
-    reward_fn,
-    label: str,
-    episode_num: int,
-    n_episodes: int,
-) -> dict:
+def train_one_condition(
+    algorithm:   str,
+    reward_name: str,
+    seed:        int,
+    n_episodes:  int,
+) -> None:
     """
-    Renders one episode and prints live step feedback.
-    label describes the condition being shown (e.g. 'PPO | dense').
+    Full training + evaluation loop for one (algorithm, reward_fn, seed) triple.
+    Writes one CSV to logs/ and appends one row to logs/summary.csv.
     """
-    obs, _ = env.reset()
-    ep_reward, ep_env_reward, step, reached_goal = 0.0, 0.0, 0, False
-    prev_obs = obs.copy()
+    reward_fn = get_reward_fn(reward_name)
+    env       = MountainCarWrapper(reward_fn=reward_fn, seed=seed)
+    logger    = make_logger(algorithm=algorithm, reward_fn=reward_name, seed=seed)
 
-    print(f"\n  [{label}]  Episode {episode_num}/{n_episodes}")
-    print(f"  {'step':>5}  {'position':>10}  {'velocity':>10}  {'shaped_r':>10}")
-    print("  " + "-" * 42)
+    print(f"\n  [{algorithm} | {reward_name} | seed={seed}]  "
+          f"training for {n_episodes} episodes ...")
 
-    while True:
-        env.render()
-        time.sleep(FRAME_DELAY)
+    # ---- Training ----
+    for ep in range(1, n_episodes + 1):
+        steps, ep_shaped, ep_env, goal = run_episode(env, algorithm)
 
-        action = env.action_space.sample()
-        next_obs, env_reward, terminated, truncated, _ = env.step(action)
+        logger.log(EpisodeRecord(
+            algorithm        = algorithm,
+            reward_fn        = reward_name,
+            seed             = seed,
+            run_id           = logger.run_id,
+            episode          = ep,
+            total_steps      = 0,       # overwritten inside logger.log()
+            episode_steps    = steps,
+            episode_reward   = round(ep_shaped, 4),
+            env_reward_sum   = round(ep_env,    4),
+            reached_goal     = goal,
+            rolling_avg_10   = 0.0,     # overwritten inside logger.log()
+            learning_reached = False,   # overwritten inside logger.log()
+        ))
 
-        shaped = reward_fn(
-            obs=prev_obs, action=action, next_obs=next_obs,
-            done=terminated or truncated, env_reward=env_reward,
-        )
-
-        ep_reward     += shaped
-        ep_env_reward += env_reward
-        step          += 1
-        prev_obs       = next_obs.copy()
-
-        if step % 25 == 0:
-            pos, vel = next_obs
-            print(f"  {step:>5}  {pos:>+10.3f}  {vel:>+10.5f}  {shaped:>+10.4f}")
-
-        if terminated:
-            reached_goal = True
-            print(f"\n  *** GOAL REACHED at step {step}! ***")
-
-        if terminated or truncated:
-            break
-
-    return {
-        "label":        label,
-        "steps":        step,
-        "shaped_r":     round(ep_reward, 4),
-        "env_r":        round(ep_env_reward, 4),
-        "reached_goal": reached_goal,
-    }
-
-
-def run_comparison_visual(conditions: list[tuple], n_episodes: int) -> None:
-    """
-    conditions : list of (label, reward_name) pairs to run sequentially.
-    Each condition gets its own pygame window, opened and closed in turn.
-    After all conditions, prints a side-by-side comparison table.
-    """
-    all_results = []   # list of lists — one inner list per condition
-
-    for label, reward_name in conditions:
-        reward_fn  = get_reward_fn(reward_name)
-        results    = []
-
-        print(f"\n{'=' * 65}")
-        print(f"  Now showing: {label}")
-        print(f"  Reward function: {reward_name}")
-        print(f"  Close the window after episode {n_episodes} to continue.")
-        print(f"{'=' * 65}")
-
-        env = gym.make("MountainCar-v0", render_mode="human")
-        try:
-            for ep in range(1, n_episodes + 1):
-                r = run_visual_episode(env, reward_fn, label, ep, n_episodes)
-                results.append(r)
-        except Exception as e:
-            print(f"  Window closed: {e}")
-        finally:
-            env.close()
-
-        all_results.append((label, results))
-
-    # --- Comparison table ---
-    print("\n" + "=" * 65)
-    print("  VISUAL COMPARISON TABLE")
-    print("  (mirrors the sensitivity analysis — same conditions, live behavior)")
-    print("=" * 65)
-    print(f"  {'Condition':<28}  {'Ep':>3}  {'Steps':>6}  {'Shaped R':>10}  {'Env R':>8}  {'Goal':>5}")
-    print("  " + "-" * 63)
-
-    for label, results in all_results:
-        for r in results:
+        if ep % 50 == 0 or ep == n_episodes:
+            rolling = round(float(np.mean(logger._window_10)), 2) \
+                      if logger._window_10 else "n/a"
             print(
-                f"  {label:<28}  "
-                f"{r['steps']:>6}  "
-                f"{r['shaped_r']:>10.3f}  "
-                f"{r['env_r']:>8.3f}  "
-                f"{'YES' if r['reached_goal'] else 'no':>5}"
+                f"    ep {ep:>4}/{n_episodes}  "
+                f"steps={steps:4d}  "
+                f"env_r={ep_env:8.2f}  "
+                f"rolling_avg={rolling:>8}"
             )
-        # Average row per condition
-        avg_steps    = sum(r["steps"]    for r in results) / len(results)
-        avg_env_r    = sum(r["env_r"]    for r in results) / len(results)
-        avg_shaped_r = sum(r["shaped_r"] for r in results) / len(results)
-        goal_count   = sum(r["reached_goal"] for r in results)
-        print(
-            f"  {'  ↳ avg':<28}  "
-            f"{avg_steps:>6.1f}  "
-            f"{avg_shaped_r:>10.3f}  "
-            f"{avg_env_r:>8.3f}  "
-            f"{goal_count}/{len(results):>3}"
-        )
-        print("  " + "-" * 63)
+
+    # ---- Post-training evaluation ----
+    successes = sum(
+        1 for _ in range(EVAL_EPISODES)
+        if run_episode(env, algorithm)[3]
+    )
+    logger.record_eval_success_rate(successes, EVAL_EPISODES)
+    logger.close()
+
+
+# -----------------------------------------------------------------------
+# Run all 9 conditions for one algorithm
+# -----------------------------------------------------------------------
+
+def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int]) -> None:
+    n_conditions = len(seeds) * len(REWARD_REGISTRY)
 
     print("=" * 65)
+    print(f"  ALGORITHM : {algorithm}")
+    print(f"  Conditions: {n_conditions}  "
+          f"({len(seeds)} seeds × {len(REWARD_REGISTRY)} reward functions)")
+    print(f"  Episodes  : {n_episodes} per condition")
+    print(f"  Seeds     : {seeds}")
+    print(f"  Eval eps  : {EVAL_EPISODES} per condition (post-training)")
+    print(f"  Metrics   : learning_speed | final_performance | "
+          f"eval_success_rate | stability_variance")
+    print("=" * 65)
 
+    for seed in seeds:
+        print(f"\n{'─' * 65}")
+        print(f"  Seed {seed}")
+        print(f"{'─' * 65}")
+        for reward_name in REWARD_REGISTRY:
+            train_one_condition(
+                algorithm   = algorithm,
+                reward_name = reward_name,
+                seed        = seed,
+                n_episodes  = n_episodes,
+            )
 
-# -----------------------------------------------------------------------
-# Interactive prompt — two comparison modes
-# -----------------------------------------------------------------------
-
-def pick_visualization_mode() -> list[tuple]:
-    """
-    Returns a list of (label, reward_name) pairs for run_comparison_visual().
-    Two modes:
-      A) Fix algorithm  → vary reward functions  (reward sensitivity axis)
-      B) Fix reward     → vary algorithms         (algorithm sensitivity axis)
-    """
     print("\n" + "=" * 65)
-    print("  VISUALIZATION — Comparative Mode")
+    print(f"  {algorithm} — all {n_conditions} conditions complete.")
+    print(f"  CSVs written to logs/")
     print("=" * 65)
-    print("""
-  Two views, matching the two sensitivity analyses in the report:
 
-    [A]  Fix an algorithm, vary reward functions
-         → See how reward design changes behavior for one algorithm
-         → Mirrors: Reward Sensitivity Analysis
 
-    [B]  Fix a reward function, vary algorithms
-         → See how algorithms differ under the same reward
-         → Mirrors: Algorithm Sensitivity Analysis
-    """)
+# -----------------------------------------------------------------------
+# Per-algorithm sensitivity report
+# -----------------------------------------------------------------------
 
-    while True:
-        mode = input("  Choose mode [A / B]: ").strip().upper()
-        if mode in {"A", "B"}:
-            break
-        print("  Please enter A or B.")
+def run_report(algorithm: str) -> None:
+    """
+    Prints a focused sensitivity report for the runs just completed.
+    Filters summary.csv to this algorithm's rows only so partial results
+    (e.g. only PPO done so far) still produce a clean, self-contained report.
+    """
+    from metrics import (
+        load_summary, reward_sensitivity,
+        training_stability, summarize_all_metrics,
+    )
 
-    if mode == "A":
-        print("\n  Which algorithm do you want to fix?")
-        for i, algo in enumerate(ALGORITHMS, 1):
-            print(f"    [{i}] {algo}")
-        while True:
-            ch = input("  Enter 1 / 2 / 3: ").strip()
-            if ch in {"1", "2", "3"}:
-                algo = ALGORITHMS[int(ch) - 1]
-                break
-            print("  Please enter 1, 2, or 3.")
+    rows = load_summary()
+    rows = [r for r in rows if r["algorithm"] == algorithm]
 
-        # All 3 reward functions for the chosen algorithm
-        conditions = [
-            (f"{algo} | {rname}", rname)
-            for rname in REWARD_REGISTRY.keys()
-        ]
-        print(f"\n  Will show {algo} under: dense → sparse → potential_based")
+    if not rows:
+        print(f"\n  No summary rows found for {algorithm}. "
+              "Did the training complete?\n")
+        return
 
-    else:  # mode == "B"
-        print("\n  Which reward function do you want to fix?")
-        reward_names = list(REWARD_REGISTRY.keys())
-        for i, rname in enumerate(reward_names, 1):
-            print(f"    [{i}] {rname}")
-        while True:
-            ch = input("  Enter 1 / 2 / 3: ").strip()
-            if ch in {"1", "2", "3"}:
-                rname = reward_names[int(ch) - 1]
-                break
-            print("  Please enter 1, 2, or 3.")
+    print("\n" + "=" * 65)
+    print(f"  RESULTS — {algorithm}  ({len(rows)} runs)")
+    print("=" * 65)
 
-        # All 3 algorithms for the chosen reward function
-        conditions = [
-            (f"{algo} | {rname}", rname)
-            for algo in ALGORITHMS
-        ]
-        print(f"\n  Will show {rname} reward under: PPO → DQN → A2C")
+    # Per-run metrics table
+    print(f"\n  {'Run ID':<34} {'Learn':>7} {'FinalPerf':>10} "
+          f"{'SuccRate%':>10} {'StabVar':>9}")
+    print("  " + "─" * 72)
+    for m in summarize_all_metrics(rows):
+        ls = m["learning_speed"]
+        ls = str(ls) if ls != "failed" else "FAILED"
+        print(
+            f"  {m['run_id']:<34} "
+            f"{ls:>7} "
+            f"{str(m['final_performance']):>10} "
+            f"{str(m['eval_success_rate']):>10} "
+            f"{str(m['stability_variance']):>9}"
+        )
 
-    print("  Each condition opens a separate window. Close it to move to the next.")
-    return conditions
+    # Training stability across seeds
+    print(f"\n  Training Stability — variance across seeds per reward function")
+    print(f"  (high variance = outcome sensitive to random initialisation)\n")
+    stab = training_stability(rows)
+    for (algo, reward_fn), data in sorted(stab.items()):
+        seed_str = "  ".join(f"seed{s}={p}" for s, p in data["per_seed"].items())
+        print(f"    {reward_fn}")
+        print(f"      {seed_str}")
+        print(f"      mean={data['mean']}  variance={data['variance']}")
+
+    # Reward sensitivity for this algorithm
+    print(f"\n  Reward Sensitivity — how much does reward design matter for {algorithm}?")
+    print(f"  (variance in seed-averaged final_performance across reward functions)\n")
+    rs = reward_sensitivity(rows)
+    if algorithm in rs:
+        data = rs[algorithm]
+        for rf, val in data["seed_averaged_perf_per_reward"].items():
+            print(f"    {rf:<20}  seed-avg final_perf = {val}")
+        print(f"\n    {data['interpretation']}")
+
+    print("\n" + "=" * 65)
+    print(f"  Tip: run plot.py after all three algorithms are complete")
+    print(f"  for cross-algorithm comparison figures.")
+    print("=" * 65 + "\n")
 
 
 # -----------------------------------------------------------------------
@@ -335,22 +278,45 @@ def pick_visualization_mode() -> list[tuple]:
 # -----------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Phase 1 — Full Run")
-    parser.add_argument("--episodes",     type=int, default=3)
-    parser.add_argument("--vis-episodes", type=int, default=2)
-    parser.add_argument("--no-visual",    action="store_true")
+    parser = argparse.ArgumentParser(
+        description=(
+            "MountainCar Reward Sensitivity Study — single-algorithm runner.\n"
+            "Each team member runs this once for their own algorithm.\n\n"
+            "  Person 1:  python run.py --algorithm PPO\n"
+            "  Person 2:  python run.py --algorithm DQN\n"
+            "  Person 3:  python run.py --algorithm A2C"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--algorithm", required=True, choices=ALGORITHMS,
+        help="Which algorithm to run: PPO, DQN, or A2C"
+    )
+    parser.add_argument(
+        "--episodes", type=int, default=N_EPISODES,
+        help=f"Training episodes per condition (default: {N_EPISODES}). "
+             "Must be > 100 for metrics to be meaningful."
+    )
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", default=DEFAULT_SEEDS,
+        help="Random seeds (default: 42 123 456)"
+    )
     args = parser.parse_args()
 
-    # 1. Smoke test
-    smoke_test(n_episodes=args.episodes)
+    if args.episodes <= 100:
+        print(
+            f"\n  WARNING: --episodes {args.episodes} is ≤ 100. "
+            "final_performance will average fewer than 100 episodes and "
+            "stability variance will be unreliable. Recommend ≥ 200, ideally 500+.\n"
+        )
 
-    # 2. Sensitivity analysis
-    run_analysis()
+    run_algorithm(
+        algorithm  = args.algorithm,
+        n_episodes = args.episodes,
+        seeds      = args.seeds,
+    )
 
-    # 3. Comparative visualization
-    if not args.no_visual:
-        conditions = pick_visualization_mode()
-        run_comparison_visual(conditions=conditions, n_episodes=args.vis_episodes)
+    run_report(algorithm=args.algorithm)
 
 
 if __name__ == "__main__":

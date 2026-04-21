@@ -70,7 +70,7 @@ class MountainCarWrapper(gym.Wrapper):
 
         info["step"] = self._step_count
         info["episode"] = self._episode_count
-        info["env_reward"] = env_reward   # keep original for diagnostics
+        info["env_reward"] = env_reward   
 
         return next_obs, reward, terminated, truncated, info
 
