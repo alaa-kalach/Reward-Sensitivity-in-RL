@@ -70,12 +70,12 @@ MAX_STEPS      = 200        # MountainCar-v0 max steps per episode
 HYPERPARAMS = {
     "PPO": dict(
         learning_rate  = 3e-4,
-        n_steps        = 2048,
+        n_steps        = 1024,
         batch_size     = 64,
         gamma          = 0.99,
         gae_lambda     = 0.95,
         clip_range     = 0.2,
-        ent_coef       = 0.01,    # entropy bonus — helps exploration under sparse reward
+        ent_coef       = 0.01,   
         vf_coef        = 0.5,
         max_grad_norm  = 0.5,
         n_epochs       = 10,
@@ -250,7 +250,7 @@ def train_one_condition(
         while True:
             action, _ = model.predict(obs, deterministic=True)
             obs, _, terminated, truncated, info = eval_env.step(action)
-            if terminated:
+            if info.get("reached_goal", False):  
                 reached = True
             if terminated or truncated:
                 break

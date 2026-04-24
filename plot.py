@@ -74,7 +74,7 @@ def _load_run_csv(
     reward_name: str,
     seed:        int,
     logs_dir:    str = LOGS_DIR,
-) -> list[dict] | None:
+) -> object:
     """
     Returns parsed rows for one run, or None if the file is missing.
     Missing files are expected when only some team members have finished.

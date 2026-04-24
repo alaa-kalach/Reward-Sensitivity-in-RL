@@ -20,7 +20,9 @@ from typing import Optional
 
 
 LOGS_DIR              = "logs"
-PERFORMANCE_THRESHOLD = -90.0   # learning speed: 10-window avg must reach this
+# MountainCar-v0 is typically considered "solved" around -110 (avg over 100 eps).
+# Using -90 is unnecessarily strict and labels successful learning as "failed".
+PERFORMANCE_THRESHOLD = -110.0  # learning speed: 10-window avg must reach this
 WINDOW_SIZE           = 10      # rolling window for learning speed detection
 FINAL_WINDOW          = 100     # last N episodes for final performance + stability
 

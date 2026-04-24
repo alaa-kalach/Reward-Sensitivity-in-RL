@@ -31,17 +31,29 @@ def dense_reward(
     Shaped reward that provides continuous feedback on every step.
 
     Components:
-      - Position gain  : rewards moving toward the goal
+      - Position bonus : rewards being further right (closer to goal)
+                         uses absolute position so signal is always meaningful
       - Speed bonus    : rewards high absolute velocity (building momentum)
       - Goal bonus     : large one-time reward on success
-      - Step penalty   : small constant to discourage unnecessary steps
     """
-    position_gain = (next_obs[0] - obs[0]) * 100  
-    speed_bonus   = 10.0 * abs(next_obs[1])       
-    step_penalty  = -0.01
-    goal_bonus    = 10.0 if next_obs[0] >= GOAL_POSITION else 0.0
+    # IMPORTANT: keep the shaped reward "goal-directed".
+    # The original version added a large positive baseline every step (height/speed),
+    # which can make "survive 200 steps without reaching the goal" optimal under the
+    # *shaped* reward, even though env reward stays at -200.
+    pos, vel       = float(obs[0]), float(obs[1])
+    next_pos, nvel = float(next_obs[0]), float(next_obs[1])
 
-    return position_gain + speed_bonus + step_penalty + goal_bonus
+    # Reward progress to the right (potential-like but simpler/stronger signal).
+    progress_reward = (next_pos - pos) * 10.0
+
+    # Small momentum term to encourage building speed without dominating.
+    speed_reward = abs(nvel) * 0.5
+
+    # One-time goal bonus to strongly prefer termination by success.
+    goal_bonus = 50.0 if next_pos >= GOAL_POSITION else 0.0
+
+    # Combine with true environment reward (-1 per step) to keep incentives aligned.
+    return float(env_reward) + progress_reward + speed_reward + goal_bonus
 
 
 # ----------------------------------------------------------------------

@@ -24,7 +24,7 @@ class MountainCarWrapper(gym.Wrapper):
         seed: int = 42,
         max_steps: int = 999,
     ):
-        env = gym.make("MountainCar-v0")
+        env = gym.make("MountainCar-v0", max_episode_steps=200)
         super().__init__(env)
 
         self.reward_fn = reward_fn
@@ -50,7 +50,15 @@ class MountainCarWrapper(gym.Wrapper):
         return obs, info
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, dict]:
+        # SB3 sometimes provides actions as 0-d/1-d numpy arrays for Discrete spaces.
+        if isinstance(action, np.ndarray):
+            action = int(action.item())
         next_obs, env_reward, terminated, truncated, info = self.env.step(action)
+
+        # Force termination when goal is reached (fixes Gym/SB3 compatibility)
+        if next_obs[0] >= 0.5:
+            terminated = True
+            
 
         # Inject custom reward
         reward = self.reward_fn(
@@ -70,7 +78,9 @@ class MountainCarWrapper(gym.Wrapper):
 
         info["step"] = self._step_count
         info["episode_num"] = self._episode_count
-        info["env_reward"] = env_reward   
+        info["env_reward"] = env_reward
+        # For MountainCar-v0, `terminated` corresponds to reaching the goal.
+        info["reached_goal"] = bool(terminated)
 
         return next_obs, reward, terminated, truncated, info
 
