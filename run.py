@@ -82,7 +82,7 @@ HYPERPARAMS = {
         policy         = "MlpPolicy",
     ),
     "A2C": dict(
-        learning_rate  = 7e-4,
+        learning_rate  = 1e-3,
         n_steps        = 5,
         gamma          = 0.99,
         gae_lambda     = 1.0,
