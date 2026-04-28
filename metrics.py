@@ -53,7 +53,8 @@ def load_summary(summary_path: str = SUMMARY_FILE) -> list[dict]:
         row["learning_speed"]     = (
             int(row["learning_speed"])
             if row.get("learning_speed") not in (None, "", "failed")
-            else "failed"
+            and not str(row.get("learning_speed", "")).startswith("learned_slow")
+            else row.get("learning_speed", "failed")
         )
 
     return rows
@@ -205,7 +206,7 @@ def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
     print("  " + "-" * 74)
     for m in summarize_all_metrics(rows):
         ls     = m["learning_speed"]
-        ls_str = str(ls) if ls != "failed" else "FAILED"
+        ls_str = str(ls) if isinstance(ls, int) else ("FAILED" if ls == "failed" else str(ls).upper())
         print(
             f"  {m['run_id']:<34} "
             f"{ls_str:>7} "

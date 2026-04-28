@@ -1,7 +1,7 @@
 """
 tune_a2c.py
 Hyperparameter tuning for A2C.
-8 combinations, dense reward, seed 42, 3000 episodes.
+12 combinations, dense reward, seed 42, 3000 episodes.
 """
 
 import numpy as np
@@ -15,16 +15,19 @@ SEED      = 42
 REWARD    = "dense"
 MAX_STEPS = 200
 
-# 8 combinations — meaningfully different from each other
 GRID = [
-    {"learning_rate": 1e-3,  "n_steps": 5,   "ent_coef": 0.01},
-    {"learning_rate": 1e-3,  "n_steps": 5,   "ent_coef": 0.1 },
-    {"learning_rate": 1e-3,  "n_steps": 128, "ent_coef": 0.01},
-    {"learning_rate": 1e-3,  "n_steps": 128, "ent_coef": 0.1 },
-    {"learning_rate": 7e-4,  "n_steps": 5,   "ent_coef": 0.01},
-    {"learning_rate": 7e-4,  "n_steps": 5,   "ent_coef": 0.1 },
-    {"learning_rate": 7e-4,  "n_steps": 128, "ent_coef": 0.01},
-    {"learning_rate": 7e-4,  "n_steps": 128, "ent_coef": 0.1 },
+    {"learning_rate": 1e-3,  "n_steps": 5,    "ent_coef": 0.01},
+    {"learning_rate": 1e-3,  "n_steps": 5,    "ent_coef": 0.1 },
+    {"learning_rate": 7e-4,  "n_steps": 5,    "ent_coef": 0.01},
+    {"learning_rate": 7e-4,  "n_steps": 5,    "ent_coef": 0.1 },
+    {"learning_rate": 1e-3,  "n_steps": 128,  "ent_coef": 0.01},
+    {"learning_rate": 1e-3,  "n_steps": 128,  "ent_coef": 0.1 },
+    {"learning_rate": 7e-4,  "n_steps": 128,  "ent_coef": 0.01},
+    {"learning_rate": 7e-4,  "n_steps": 128,  "ent_coef": 0.1 },
+    {"learning_rate": 1e-3,  "n_steps": 1024, "ent_coef": 0.01},
+    {"learning_rate": 1e-3,  "n_steps": 1024, "ent_coef": 0.1 },
+    {"learning_rate": 7e-4,  "n_steps": 1024, "ent_coef": 0.01},
+    {"learning_rate": 7e-4,  "n_steps": 1024, "ent_coef": 0.1 },
 ]
 
 
@@ -56,7 +59,7 @@ class RewardTracker(BaseCallback):
 
 
 def evaluate(params, combo_num):
-    print(f"\n  [{combo_num}/8] lr={params['learning_rate']} | "
+    print(f"\n  [{combo_num}/{len(GRID)}] lr={params['learning_rate']} | "
           f"n_steps={params['n_steps']} | ent_coef={params['ent_coef']}")
 
     reward_fn = get_reward_fn(REWARD)
@@ -91,20 +94,16 @@ def main():
     print(f"  Reward: {REWARD} | Seed: {SEED} | Episodes: {EPISODES}")
     print(f"  Total combinations: {len(GRID)}")
 
-
     results = []
     for i, params in enumerate(GRID, 1):
         final_perf, success_rate = evaluate(params, i)
-        results.append({**params, 
-                        "final_perf": final_perf, 
+        results.append({**params,
+                        "final_perf": final_perf,
                         "success_rate": success_rate})
 
-    # Sort by success rate first, then final performance
     results.sort(key=lambda x: (x["success_rate"], x["final_perf"]), reverse=True)
 
-
     print("  RESULTS — Best to Worst")
-
     print(f"  {'lr':<10} {'n_steps':<10} {'ent_coef':<10} {'final_perf':<12} {'success%'}")
     print("  " + "-" * 55)
     for r in results:
@@ -112,7 +111,6 @@ def main():
               f"{str(r['ent_coef']):<10} {str(r['final_perf']):<12} {r['success_rate']}%")
 
     best = results[0]
-
     print("  WINNER")
     print("=" * 60)
     print(f"  learning_rate = {best['learning_rate']}")
@@ -121,7 +119,6 @@ def main():
     print(f"  final_perf    = {best['final_perf']}")
     print(f"  success_rate  = {best['success_rate']}%")
     print("=" * 60)
-
 
 
 if __name__ == "__main__":
