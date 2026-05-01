@@ -112,7 +112,6 @@ class ExperimentLogger:
         self._start_time        = time.time()
         self._episode_count     = 0
         self._threshold_crossed = False
-        self._first_goal_episode: Optional[int] = None
 
         # Rolling buffers
         self._window_10 = deque(maxlen=WINDOW_SIZE)   # learning speed detection
@@ -156,10 +155,6 @@ class ExperimentLogger:
             self.learning_speed     = self._episode_count
             self._threshold_crossed = True
 
-        # Track first episode the goal was ever reached (for learned_slow label)
-        if self._first_goal_episode is None and record.reached_goal:
-            self._first_goal_episode = self._episode_count
-
         record.learning_reached = self._threshold_crossed
 
         self._writer.writerow(asdict(record))
@@ -199,15 +194,7 @@ class ExperimentLogger:
             "reward_fn":          self.reward_fn,
             "seed":               self.seed,
             # Metric 1 — Learning speed
-            # Three states:
-            #   <episode number> : crossed the -110 rolling avg threshold (fast learner)
-            #   "learned_slow(N)": never crossed threshold but reached goal at episode N
-            #   "failed"         : never reached the goal at all (success rate = 0%)
-            "learning_speed": (
-                self.learning_speed if self.learning_speed
-                else f"learned_slow({self._first_goal_episode})" if (self.eval_success_rate or 0) > 0
-                else "failed"
-            ),
+            "learning_speed":     self.learning_speed if self.learning_speed else "failed",
             # Metric 2 — Final performance
             "final_performance":  self.final_performance,
             # Metric 3 — Success rate (None until eval is run)

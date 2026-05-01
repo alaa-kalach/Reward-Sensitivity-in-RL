@@ -8,3 +8,12 @@ PPO_potential_based_seed123,PPO,potential_based,123,2573,-119.16,100.0,409.0144
 PPO_dense_seed456,PPO,dense,456,1975,-120.33,100.0,277.1611
 PPO_sparse_seed456,PPO,sparse,456,failed,-200.0,0.0,0.0
 PPO_potential_based_seed456,PPO,potential_based,456,3438,-120.92,99.0,325.3136
+DQN_dense_seed42,DQN,dense,42,4455,-157.52,85.0,670.5696
+DQN_sparse_seed42,DQN,sparse,42,2691,-131.4,98.0,1200.34
+DQN_potential_based_seed42,DQN,potential_based,42,3564,-171.88,81.0,631.9256
+DQN_dense_seed123,DQN,dense,123,learned_slow(3727),-194.73,89.0,157.2771
+DQN_sparse_seed123,DQN,sparse,123,2776,-118.15,99.0,569.0675
+DQN_potential_based_seed123,DQN,potential_based,123,failed,-200.0,0.0,0.0
+DQN_dense_seed456,DQN,dense,456,learned_slow(2740),-184.87,59.0,370.9931
+DQN_sparse_seed456,DQN,sparse,456,3447,-140.99,100.0,51.2099
+DQN_potential_based_seed456,DQN,potential_based,456,failed,-200.0,0.0,0.0

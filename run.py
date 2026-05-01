@@ -92,14 +92,14 @@ HYPERPARAMS = {
         policy         = "MlpPolicy",
     ),
     "DQN": dict(
-        learning_rate        = 1e-4,
-        batch_size           = 64,
+        learning_rate        = 5e-5,#1e-4,
+        batch_size           = 128, #64,
         gamma                = 0.99,
         buffer_size          = 50_000,
         learning_starts      = 1000,
         target_update_interval = 500,
-        exploration_fraction = 0.3,   # longer exploration helps under sparse reward
-        exploration_final_eps = 0.05,
+        exploration_fraction = 0.5, #0.3,   # longer exploration helps under sparse reward
+        exploration_final_eps = 0.01, #0.05,
         train_freq           = 4,
         policy               = "MlpPolicy",
     ),

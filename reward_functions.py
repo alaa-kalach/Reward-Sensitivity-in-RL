@@ -109,7 +109,7 @@ def potential_based_reward(
     """
     gamma: float = 0.99
     shaping = gamma * _potential(next_obs) - _potential(obs)
-    return env_reward + shaping
+    return env_reward + shaping * 10.0 #added a multiplier x10 
 
 
 # ----------------------------------------------------------------------
