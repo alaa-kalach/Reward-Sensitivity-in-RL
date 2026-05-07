@@ -6,36 +6,7 @@ Each run covers 9 experiments:
     3 reward functions (dense, sparse, potential_based)
   × 3 random seeds (42, 123, 456)
 
-The three team members run independently:
-    python run.py --algorithm PPO
-    python run.py --algorithm DQN
-    python run.py --algorithm A2C
 
-All 9 CSVs land in logs/ with the standard naming convention
-(e.g. PPO_dense_seed42.csv) so the shared summary.csv and plot.py
-can aggregate across all three members once everyone is done.
-
-Flow per algorithm
-------------------
-  1. Training   — N_EPISODES per condition, all metrics tracked via ExperimentLogger.
-  2. Evaluation — EVAL_EPISODES post-training episodes per condition, goal-reaching counted.
-  3. Report     — Per-algorithm sensitivity summary printed from the 9 completed runs.
-
-Algorithm implementations
---------------------------
-  PPO and A2C : on-policy (stable-baselines3). Trained via model.learn() using a
-                callback that hooks into the existing ExperimentLogger each episode.
-  DQN         : off-policy (stable-baselines3). Same approach.
-
-  Hyperparameters are tuned per algorithm (not per reward condition) so that
-  performance differences across reward types reflect reward sensitivity only.
-
-Usage
------
-    python run.py --algorithm PPO
-    python run.py --algorithm DQN --episodes 300
-    python run.py --algorithm A2C --seeds 42 123
-    python run.py --algorithm PPO --episodes 200 --seeds 42
 """
 
 import argparse
@@ -52,17 +23,15 @@ from reward_curriculum import CurriculumReward
 from logger import make_logger, EpisodeRecord
 from metrics import compute_sensitivity_analysis
 
-# -----------------------------------------------------------------------
-# Study constants
-# -----------------------------------------------------------------------
+
 
 ALGORITHMS     = ["PPO", "DQN", "A2C"]
 DEFAULT_SEEDS  = [42, 123, 456]
 N_EPISODES     = 5000
-EVAL_EPISODES  = 100        # post-training evaluation episodes per condition
-MAX_STEPS      = 200        # MountainCar-v0 max steps per episode
+EVAL_EPISODES  = 100        
+MAX_STEPS      = 200        
 
-# Extended reward variants available from the CLI.
+
 EXTENDED_REWARDS = {
     "dense_noisy": dense_noisy,
     "sparse_noisy": sparse_noisy,
@@ -71,11 +40,9 @@ SPECIAL_REWARDS = {"curriculum"}
 AVAILABLE_REWARD_NAMES = list(REWARD_REGISTRY.keys()) + list(EXTENDED_REWARDS.keys()) + list(SPECIAL_REWARDS)
 
 
-# -----------------------------------------------------------------------
+
 # Hyperparameters — tuned once per algorithm, fixed across all reward types
-# This isolates reward sensitivity: any performance difference across reward
-# conditions reflects the reward, not incidental hyperparameter mismatches.
-# -----------------------------------------------------------------------
+
 
 HYPERPARAMS = {
     "PPO": dict(
@@ -108,7 +75,7 @@ HYPERPARAMS = {
         buffer_size          = 50_000,
         learning_starts      = 1000,
         target_update_interval = 500,
-        exploration_fraction = 0.5,   # longer exploration helps under sparse reward
+        exploration_fraction = 0.5,   
         exploration_final_eps = 0.01,
         train_freq           = 4,
         policy               = "MlpPolicy",
@@ -116,9 +83,8 @@ HYPERPARAMS = {
 }
 
 
-# -----------------------------------------------------------------------
-# SB3 callback — bridges SB3's training loop into ExperimentLogger
-# -----------------------------------------------------------------------
+
+
 
 class LoggerCallback(BaseCallback):
     """
@@ -138,7 +104,7 @@ class LoggerCallback(BaseCallback):
         self._seed          = seed
         self._curriculum_reward = curriculum_reward
 
-        # Per-episode accumulators
+   
         self._ep_shaped    = 0.0
         self._ep_env       = 0.0
         self._ep_steps     = 0
@@ -146,7 +112,7 @@ class LoggerCallback(BaseCallback):
         self._ep_count     = 0
 
     def _on_step(self) -> bool:
-        # SB3 passes lists (one entry per parallel env — we use 1 env)
+        
         info       = self.locals["infos"][0]
         shaped_r   = self.locals["rewards"][0]
         done       = self.locals["dones"][0]
@@ -161,7 +127,7 @@ class LoggerCallback(BaseCallback):
         if done:
             self._ep_count += 1
             if self._curriculum_reward is not None:
-                # Advance dense->sparse interpolation once per finished episode.
+                
                 self._curriculum_reward.update(self._ep_count)
             self._logger.log(EpisodeRecord(
                 algorithm        = self._algorithm,
@@ -169,13 +135,13 @@ class LoggerCallback(BaseCallback):
                 seed             = self._seed,
                 run_id           = self._logger.run_id,
                 episode          = self._ep_count,
-                total_steps      = 0,       # overwritten inside logger.log()
+                total_steps      = 0,     
                 episode_steps    = self._ep_steps,
                 episode_reward   = round(self._ep_shaped, 4),
                 env_reward_sum   = round(self._ep_env,    4),
                 reached_goal     = self._ep_reached,
-                rolling_avg_10   = 0.0,     # overwritten inside logger.log()
-                learning_reached = False,   # overwritten inside logger.log()
+                rolling_avg_10   = 0.0,     
+                learning_reached = False,   
             ))
 
             if self._ep_count % 50 == 0:
@@ -188,24 +154,21 @@ class LoggerCallback(BaseCallback):
                     f"rolling_avg={rolling:>8}"
                 )
 
-            # Reset accumulators for next episode
+     
             self._ep_shaped  = 0.0
             self._ep_env     = 0.0
             self._ep_steps   = 0
             self._ep_reached = False
 
-        return True  # returning False would stop training early
+        return True  
 
 
-# -----------------------------------------------------------------------
+
 # Model factory
-# -----------------------------------------------------------------------
+
 
 def make_model(algorithm: str, env: MountainCarWrapper, seed: int):
-    """
-    Instantiates the SB3 model for the given algorithm with the fixed
-    hyperparameters defined above. Seed is passed for reproducibility.
-    """
+
     params = HYPERPARAMS[algorithm].copy()
     policy = params.pop("policy")
 
@@ -219,9 +182,7 @@ def make_model(algorithm: str, env: MountainCarWrapper, seed: int):
         raise ValueError(f"Unknown algorithm: {algorithm}")
 
 
-# -----------------------------------------------------------------------
-# Single condition: one (reward_fn, seed) pair for the chosen algorithm
-# -----------------------------------------------------------------------
+
 
 def train_one_condition(
     algorithm:   str,
@@ -229,15 +190,7 @@ def train_one_condition(
     seed:        int,
     n_episodes:  int,
 ) -> None:
-    """
-    Full training + evaluation loop for one (algorithm, reward_fn, seed) triple.
 
-    Training uses SB3's model.learn() with a callback that routes per-episode
-    data into ExperimentLogger. Evaluation runs the trained policy deterministically
-    for EVAL_EPISODES episodes to measure success rate.
-
-    Writes one CSV to logs/ and appends/updates one row in logs/summary.csv.
-    """
     curriculum_reward = CurriculumReward() if reward_name == "curriculum" else None
     if curriculum_reward is not None:
         reward_fn = curriculum_reward
@@ -247,20 +200,17 @@ def train_one_condition(
         reward_fn = get_reward_fn(reward_name)
     env        = MountainCarWrapper(reward_fn=reward_fn, seed=seed)
     logger     = make_logger(algorithm=algorithm, reward_fn=reward_name, seed=seed)
-    total_steps = n_episodes * MAX_STEPS   # budget in steps for model.learn()
+    total_steps = n_episodes * MAX_STEPS  
 
     print(f"\n  [{algorithm} | {reward_name} | seed={seed}]  "
           f"training for {n_episodes} episodes (~{total_steps} steps) ...")
 
-    # ---- Training ----
+
     model    = make_model(algorithm, env, seed)
     callback = LoggerCallback(logger, algorithm, reward_name, seed, curriculum_reward=curriculum_reward)
     model.learn(total_timesteps=total_steps, callback=callback, reset_num_timesteps=True)
 
-    # ---- Post-training evaluation ----
-    # Run the trained policy deterministically (no exploration) for EVAL_EPISODES.
-    # Use a fresh env instance with the same reward wrapper so shaped reward is
-    # still injected, but we count goal-reaching via info["reached_goal"].
+
     eval_env  = MountainCarWrapper(reward_fn=reward_fn, seed=seed)
     successes = 0
 
@@ -283,9 +233,8 @@ def train_one_condition(
     env.close()
 
 
-# -----------------------------------------------------------------------
+
 # Run all 9 conditions for one algorithm
-# -----------------------------------------------------------------------
 
 def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int], rewards: list[str] = None) -> None:
     rewards_to_run = rewards if rewards is not None else AVAILABLE_REWARD_NAMES
@@ -321,16 +270,9 @@ def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int], rewards: li
     print("=" * 65)
 
 
-# -----------------------------------------------------------------------
 # Per-algorithm sensitivity report
-# -----------------------------------------------------------------------
-
 def run_report(algorithm: str) -> None:
-    """
-    Prints a focused sensitivity report for the runs just completed.
-    Filters summary.csv to this algorithm's rows only so partial results
-    (e.g. only PPO done so far) still produce a clean, self-contained report.
-    """
+
     from metrics import (
         load_summary, reward_sensitivity,
         training_stability, summarize_all_metrics,
@@ -389,9 +331,6 @@ def run_report(algorithm: str) -> None:
     print("=" * 65 + "\n")
 
 
-# -----------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(

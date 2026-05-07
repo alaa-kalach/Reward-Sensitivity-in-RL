@@ -3,23 +3,8 @@ metrics.py
 Computes the two cross-experiment sensitivity analyses from summary.csv.
 
 With 3 seeds x 3 reward functions x 3 algorithms = 27 runs total.
-All sensitivity computations first average final_performance across seeds
-for each (algorithm, reward_fn) condition, then compute variance across
-conditions. This isolates reward/algorithm effects from seed noise.
 
-  Reward Sensitivity (per algorithm):
-    For each algorithm, variance in seed-averaged final_performance across
-    its 3 reward conditions. High variance -> algorithm is sensitive to reward design.
-
-  Algorithm Sensitivity (per reward function):
-    For each reward type, variance in seed-averaged final_performance across
-    its 3 algorithms. High variance -> reward type strongly differentiates algorithms.
-
-  Training Stability (per condition):
-    Variance in final_performance across the 3 seeds for each (algo, reward) pair.
-    High variance -> that condition is unstable across random initializations.
 """
-
 import csv
 import os
 import numpy as np
@@ -31,9 +16,7 @@ LOGS_DIR = "logs"
 SUMMARY_FILE = os.path.join(LOGS_DIR, "summary.csv")
 
 
-# -----------------------------------------------------------------------
-# Summary reader
-# -----------------------------------------------------------------------
+
 
 def load_summary(summary_path: str = SUMMARY_FILE) -> list[dict]:
     if not os.path.exists(summary_path):
@@ -45,7 +28,7 @@ def load_summary(summary_path: str = SUMMARY_FILE) -> list[dict]:
     with open(summary_path, newline="") as f:
         rows = list(csv.DictReader(f))
 
-    # Cast numeric fields
+
     for row in rows:
         row["final_performance"]  = _safe_float(row.get("final_performance"))
         row["stability_variance"] = _safe_float(row.get("stability_variance"))
@@ -67,9 +50,7 @@ def _safe_float(val) -> Optional[float]:
         return None
 
 
-# -----------------------------------------------------------------------
-# Seed averaging — collapses 27 rows into 9 condition means
-# -----------------------------------------------------------------------
+
 
 def average_across_seeds(rows: list[dict]) -> dict:
     groups = defaultdict(list)
@@ -86,9 +67,7 @@ def average_across_seeds(rows: list[dict]) -> dict:
     }
 
 
-# -----------------------------------------------------------------------
-# Training stability — variance across seeds per condition
-# -----------------------------------------------------------------------
+
 
 def training_stability(rows: list[dict]) -> dict:
     groups = defaultdict(list)
@@ -113,14 +92,13 @@ def training_stability(rows: list[dict]) -> dict:
     return result
 
 
-# -----------------------------------------------------------------------
+
 # Core sensitivity computations (operate on seed-averaged values)
-# -----------------------------------------------------------------------
 
 def reward_sensitivity(rows: list[dict]) -> dict:
     condition_means = average_across_seeds(rows)
 
-    # Group seed-averaged means by algorithm
+
     grouped = defaultdict(dict)
     for (algo, reward_fn), mean_perf in condition_means.items():
         grouped[algo][reward_fn] = mean_perf
@@ -165,9 +143,8 @@ def algorithm_sensitivity(rows: list[dict]) -> dict:
     return result
 
 
-# -----------------------------------------------------------------------
+
 # All four metrics, per run
-# -----------------------------------------------------------------------
 
 def summarize_all_metrics(rows: list[dict]) -> list[dict]:
     out = []
@@ -187,9 +164,6 @@ def summarize_all_metrics(rows: list[dict]) -> list[dict]:
         })
     return out
 
-# -----------------------------------------------------------------------
-# Main report printer
-# -----------------------------------------------------------------------
 
 
 def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
@@ -200,7 +174,7 @@ def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
     print(f"  {len(rows)} runs total  (3 seeds x 3 reward fns x 3 algorithms)")
     print("=" * 65)
 
-    # --- [1] Per-run metrics table ---
+    #Per-run metrics table 
     print("\n  [1] Per-Run Metrics (all 27 runs)")
     print(f"  {'Run ID':<34} {'Learn':>7} {'FinalPerf':>10} {'SuccRate%':>10} {'StabVar':>9}")
     print("  " + "-" * 74)
@@ -215,7 +189,7 @@ def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
             f"{str(m['stability_variance']):>9}"
         )
 
-    # --- [2] Training stability across seeds ---
+    #Training stability across seeds 
     print("\n  [2] Training Stability — variance across 3 seeds per condition")
     print("      (High variance = outcome is sensitive to random initialization)")
     print()
@@ -227,7 +201,7 @@ def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
         print(f"          mean={data['mean']}  variance={data['variance']}")
         print()
 
-    # --- [3] Reward sensitivity ---
+    # Reward sensitivity 
     print("  [3] Reward Sensitivity — variance per algorithm across reward functions")
     print("      (Values are seed-averaged. High variance = sensitive to reward design)")
     print()
@@ -239,7 +213,7 @@ def compute_sensitivity_analysis(summary_path: str = SUMMARY_FILE) -> None:
         print(f"          {data['interpretation']}")
         print()
 
-    # --- [4] Algorithm sensitivity ---
+    # Algorithm sensitivity 
     print("  [4] Algorithm Sensitivity — variance per reward function across algorithms")
     print("      (Values are seed-averaged. High variance = reward differentiates algos)")
     print()

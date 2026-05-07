@@ -10,13 +10,7 @@ from typing import Callable, Optional, Tuple
 
 
 class MountainCarWrapper(gym.Wrapper):
-    """
-    A deterministic, reward-injectable wrapper around MountainCar-v0.
 
-    Accepts any reward function with signature:
-        reward_fn(obs, action, next_obs, done, env_reward) -> float
-    This keeps the environment logic decoupled from reward design.
-    """
 
     def __init__(
         self,
@@ -35,10 +29,8 @@ class MountainCarWrapper(gym.Wrapper):
         self._episode_count: int = 0
         self._prev_obs: Optional[np.ndarray] = None
 
-    # ------------------------------------------------------------------
-    # Core API
-    # ------------------------------------------------------------------
 
+    # Core API
     def reset(self, **kwargs) -> Tuple[np.ndarray, dict]:
         kwargs.setdefault("seed", self.seed_val + self._episode_count)
         obs, info = self.env.reset(**kwargs)
@@ -50,12 +42,12 @@ class MountainCarWrapper(gym.Wrapper):
         return obs, info
 
     def step(self, action: int) -> Tuple[np.ndarray, float, bool, bool, dict]:
-        # SB3 sometimes provides actions as 0-d/1-d numpy arrays for Discrete spaces.
+
         if isinstance(action, np.ndarray):
             action = int(action.item())
         next_obs, env_reward, terminated, truncated, info = self.env.step(action)
 
-        # Force termination when goal is reached (fixes Gym/SB3 compatibility)
+   
         if next_obs[0] >= 0.5:
             terminated = True
             
@@ -72,29 +64,26 @@ class MountainCarWrapper(gym.Wrapper):
         self._step_count += 1
         self._prev_obs = next_obs.copy()
 
-        # Enforce episode length cap
+     
         if self._step_count >= self.max_steps:
             truncated = True
 
         info["step"] = self._step_count
         info["episode_num"] = self._episode_count
         info["env_reward"] = env_reward
-        # For MountainCar-v0, `terminated` corresponds to reaching the goal.
+
         info["reached_goal"] = bool(terminated)
 
         return next_obs, reward, terminated, truncated, info
 
-    # ------------------------------------------------------------------
-    # Convenience
-    # ------------------------------------------------------------------
 
     @property
     def obs_dim(self) -> int:
-        return self.observation_space.shape[0]   # 2: position, velocity
+        return self.observation_space.shape[0]   
 
     @property
     def n_actions(self) -> int:
-        return self.action_space.n               # 3: push left, no-op, push right
+        return self.action_space.n              
 
     def __repr__(self) -> str:
         return (

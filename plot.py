@@ -2,40 +2,7 @@
 plot.py
 Standalone plotting script. Run this after all (or some) experiments are done.
 
-Generates four figure types, all saved to logs/plots/:
-
-  1. learning_curves_<ALGO>.png
-     One figure per algorithm. Three subplots (one per reward function),
-     each overlaying the 10-episode rolling average for all seeds.
-     → Answers: "How does reward design shape this algorithm's learning?"
-     → Mirrors: Reward Sensitivity axis.
-
-  2. algo_comparison_<REWARD>.png
-     One figure per reward function. Three subplots (one per algorithm),
-     each overlaying all seeds.
-     → Answers: "Do algorithms differ under the same reward?"
-     → Mirrors: Algorithm Sensitivity axis.
-
-  3. final_performance_bars.png
-     Grouped bar chart of seed-averaged final performance for every
-     (algorithm, reward) pair. One group per algorithm, one bar per
-     reward function.
-     → Answers: "Which combination performs best overall?"
-
-  4. stability_heatmap.png
-     Heatmap of training stability variance for each (algorithm, reward) pair.
-     → Answers: "Which conditions are most sensitive to random initialisation?"
-
-Partial results are handled gracefully — any run whose CSV is missing is
-skipped with a warning rather than crashing. This lets you plot after only
-one or two algorithms are complete.
-
-Usage
------
-    python plot.py                        # uses logs/ and saves to logs/plots/
-    python plot.py --logs-dir my_logs     # custom logs directory
-    python plot.py --algorithms PPO DQN   # plot only specific algorithms
-    python plot.py --no-show              # save only, never open windows
+Generates four figure types, all saved to logs/plots
 """
 
 import argparse
@@ -49,27 +16,24 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-# -----------------------------------------------------------------------
-# Constants — must match run.py / reward_functions.py
-# -----------------------------------------------------------------------
+
+
 
 ALL_ALGORITHMS   = ["PPO", "DQN", "A2C"]
 ALL_REWARD_NAMES = ["dense", "sparse", "potential_based"]
 DEFAULT_SEEDS    = [42, 123, 456]
 
-SEED_COLORS      = ["#2196F3", "#FF9800", "#4CAF50"]   # blue / orange / green
-REWARD_COLORS    = ["#5C6BC0", "#EF5350", "#26A69A"]   # indigo / red / teal
-ALGO_COLORS      = ["#7E57C2", "#FFA726", "#66BB6A"]   # purple / amber / green
+SEED_COLORS      = ["#2196F3", "#FF9800", "#4CAF50"]   
+REWARD_COLORS    = ["#5C6BC0", "#EF5350", "#26A69A"]  
+ALGO_COLORS      = ["#7E57C2", "#FFA726", "#66BB6A"]   
 
 PLOTS_DIR        = os.path.join("logs", "plots")
 LOGS_DIR         = "logs"
 
-THRESHOLD: float = -110.0   # MountainCar-v0 success threshold
+THRESHOLD: float = -110.0   
 
 
-# -----------------------------------------------------------------------
-# CSV helpers
-# -----------------------------------------------------------------------
+
 
 def _load_run_csv(
     algorithm:   str,
@@ -77,10 +41,7 @@ def _load_run_csv(
     seed:        int,
     logs_dir:    str = LOGS_DIR,
 ) -> object:
-    """
-    Returns parsed rows for one run, or None if the file is missing.
-    Missing files are expected when only some team members have finished.
-    """
+
     run_id = f"{algorithm}_{reward_name}_seed{seed}"
     path   = os.path.join(logs_dir, f"{run_id}.csv")
 
@@ -120,9 +81,7 @@ def _load_summary(logs_dir: str = LOGS_DIR) -> list[dict]:
     return rows
 
 
-# -----------------------------------------------------------------------
-# Figure 1 — Learning curves per algorithm
-# -----------------------------------------------------------------------
+
 
 def plot_learning_curves(
     algorithms: list[str],
@@ -130,10 +89,7 @@ def plot_learning_curves(
     logs_dir:   str = LOGS_DIR,
     plots_dir:  str = PLOTS_DIR,
 ) -> None:
-    """
-    One PNG per algorithm. Three subplots = one per reward function.
-    Each subplot overlays the rolling-average learning curve for each seed.
-    """
+
     for algo in algorithms:
         fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
         fig.suptitle(
@@ -170,9 +126,7 @@ def plot_learning_curves(
         _save(fig, os.path.join(plots_dir, f"learning_curves_{algo}.png"))
 
 
-# -----------------------------------------------------------------------
-# Figure 2 — Algorithm comparison per reward function
-# -----------------------------------------------------------------------
+
 
 def plot_algo_comparison(
     algorithms: list[str],
@@ -180,10 +134,7 @@ def plot_algo_comparison(
     logs_dir:   str = LOGS_DIR,
     plots_dir:  str = PLOTS_DIR,
 ) -> None:
-    """
-    One PNG per reward function. Three subplots = one per algorithm.
-    Each subplot overlays all seeds for that algorithm.
-    """
+
     for reward_name in ALL_REWARD_NAMES:
         fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
         fig.suptitle(
@@ -193,7 +144,7 @@ def plot_algo_comparison(
         )
 
         for ax, algo in zip(axes, ALL_ALGORITHMS):
-            # Grey out algorithms not in the requested list
+            
             if algo not in algorithms:
                 ax.set_title(algo, fontsize=10, color="grey")
                 ax.text(0.5, 0.5, "Not run yet", transform=ax.transAxes,
@@ -228,19 +179,14 @@ def plot_algo_comparison(
         _save(fig, os.path.join(plots_dir, f"algo_comparison_{reward_name}.png"))
 
 
-# -----------------------------------------------------------------------
-# Figure 3 — Final performance bar chart
-# -----------------------------------------------------------------------
+
 
 def plot_final_performance_bars(
     algorithms: list[str],
     logs_dir:   str = LOGS_DIR,
     plots_dir:  str = PLOTS_DIR,
 ) -> None:
-    """
-    Grouped bar chart: seed-averaged final performance per (algorithm, reward).
-    One group per algorithm, one bar per reward function.
-    """
+
     rows = _load_summary(logs_dir)
     if not rows:
         print("  [skip] summary.csv not found — skipping bar chart.")
@@ -302,27 +248,20 @@ def plot_final_performance_bars(
     _save(fig, os.path.join(plots_dir, "final_performance_bars.png"))
 
 
-# -----------------------------------------------------------------------
-# Figure 4 — Stability heatmap
-# -----------------------------------------------------------------------
+
 
 def plot_stability_heatmap(
     algorithms: list[str],
     logs_dir:   str = LOGS_DIR,
     plots_dir:  str = PLOTS_DIR,
 ) -> None:
-    """
-    Heatmap of training stability variance per (algorithm, reward) condition.
-    Rows = reward functions, Columns = algorithms.
-    Darker cell = higher variance = less stable across seeds.
-    """
+
     rows = _load_summary(logs_dir)
     if not rows:
         print("  [skip] summary.csv not found — skipping heatmap.")
         return
 
-    # Build stability variance matrix (seed-variance per condition)
-    # Re-use the same seed-grouping logic as metrics.py
+
     groups: dict = defaultdict(list)
     for row in rows:
         if row["final_performance"] is not None:
@@ -339,7 +278,7 @@ def plot_stability_heatmap(
 
     fig, ax = plt.subplots(figsize=(7, 4))
     cmap = matplotlib.colormaps.get_cmap("YlOrRd")
-    cmap.set_bad(color="#e0e0e0")   # grey for missing data
+    cmap.set_bad(color="#e0e0e0")   
 
     im = ax.imshow(matrix, cmap=cmap, aspect="auto")
     plt.colorbar(im, ax=ax, label="Variance across seeds")
@@ -366,21 +305,12 @@ def plot_stability_heatmap(
     _save(fig, os.path.join(plots_dir, "stability_heatmap.png"))
 
 
-# -----------------------------------------------------------------------
-# Figure 5 — Noise impact: clean vs noisy side by side per algorithm
-# -----------------------------------------------------------------------
-
 def plot_noise_comparison(
     algorithms: list[str],
     logs_dir:   str = LOGS_DIR,
     plots_dir:  str = PLOTS_DIR,
 ) -> None:
-    """
-    For each algorithm, shows final performance of dense vs dense_noisy
-    and sparse vs sparse_noisy as paired bars.
 
-    Answers: does noise hurt DQN more than PPO/A2C?
-    """
     rows = _load_summary(logs_dir)
     if not rows:
         print("  [skip] summary.csv not found — skipping noise comparison.")
@@ -399,7 +329,7 @@ def plot_noise_comparison(
         fontsize=12, fontweight="bold",
     )
 
-    # Aggregate seed averages
+
     groups: dict = defaultdict(list)
     for row in rows:
         if row["final_performance"] is not None:
@@ -439,22 +369,15 @@ def plot_noise_comparison(
     _save(fig, os.path.join(plots_dir, "noise_comparison.png"))
 
 
-# -----------------------------------------------------------------------
-# Figure 6 — Curriculum schedule visualization
-# -----------------------------------------------------------------------
+
+
 
 def plot_curriculum_schedule(
     n_episodes:     int   = 5000,
     transition_end: int   = 2500,
     plots_dir:      str   = PLOTS_DIR,
 ) -> None:
-    """
-    Plots the alpha (interpolation weight) over episodes showing how the
-    curriculum transitions from dense to sparse reward.
 
-    This is a standalone visualization — no CSV data needed.
-    Useful for explaining the curriculum in presentations and the report.
-    """
     episodes = np.arange(0, n_episodes + 1)
     alpha    = np.minimum(episodes / transition_end, 1.0)
     dense_w  = 1.0 - alpha
@@ -495,9 +418,7 @@ def plot_curriculum_schedule(
     _save(fig, os.path.join(plots_dir, "curriculum_schedule.png"))
 
 
-# -----------------------------------------------------------------------
-# Save helper
-# -----------------------------------------------------------------------
+
 
 def _save(fig, path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -506,9 +427,7 @@ def _save(fig, path: str) -> None:
     print(f"  [saved] {path}")
 
 
-# -----------------------------------------------------------------------
-# Main
-# -----------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(
