@@ -1,8 +1,6 @@
 """
 noise_injection.py
 Wraps any existing reward function with Gaussian noise.
-
-
 """
 
 import numpy as np
