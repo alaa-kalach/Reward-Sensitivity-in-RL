@@ -264,10 +264,10 @@ def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int], rewards: li
                 n_episodes  = n_episodes,
             )
 
-    print("\n" + "=" * 65)
+    
     print(f"  {algorithm} — all {n_conditions} conditions complete.")
     print(f"  CSVs written to logs/")
-    print("=" * 65)
+   
 
 
 # Per-algorithm sensitivity report
@@ -325,51 +325,26 @@ def run_report(algorithm: str) -> None:
             print(f"    {rf:<20}  seed-avg final_perf = {val}")
         print(f"\n    {data['interpretation']}")
 
-    print("\n" + "=" * 65)
-    print(f"  Tip: run plot.py after all three algorithms are complete")
-    print(f"  for cross-algorithm comparison figures.")
-    print("=" * 65 + "\n")
+    
 
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=(
-            "MountainCar Reward Sensitivity Study — single-algorithm runner.\n"
-            "Each team member runs this once for their own algorithm.\n\n"
-            "  Person 1:  python run.py --algorithm PPO\n"
-            "  Person 2:  python run.py --algorithm DQN\n"
-            "  Person 3:  python run.py --algorithm A2C"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--algorithm", required=True, choices=ALGORITHMS,
-        help="Which algorithm to run: PPO, DQN, or A2C"
     )
     parser.add_argument(
         "--episodes", type=int, default=N_EPISODES,
-        help=f"Training episodes per condition (default: {N_EPISODES}). "
-             "Must be > 100 for metrics to be meaningful."
     )
     parser.add_argument(
         "--seeds", type=int, nargs="+", default=DEFAULT_SEEDS,
-        help="Random seeds (default: 42 123 456)"
     )
     parser.add_argument(
         "--rewards", nargs="+", default=None,
         choices=AVAILABLE_REWARD_NAMES,
-        help="Which reward conditions to run (default: all). "
-             "Example: --rewards dense_noisy sparse_noisy"
     )
     args = parser.parse_args()
-
-    if args.episodes <= 100:
-        print(
-            f"\n  WARNING: --episodes {args.episodes} is ≤ 100. "
-            "final_performance will average fewer than 100 episodes and "
-            "stability variance will be unreliable. Recommend ≥ 200, ideally 500+.\n"
-        )
 
     run_algorithm(
         algorithm  = args.algorithm,
