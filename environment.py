@@ -28,7 +28,6 @@ class MountainCarWrapper(gym.Wrapper):
         self._episode_count: int = 0
         self._prev_obs: Optional[np.ndarray] = None
 
-    # Core API
 
     def reset(self, **kwargs) -> Tuple[np.ndarray, dict]:
         kwargs.setdefault("seed", self.seed_val + self._episode_count)
@@ -45,12 +44,10 @@ class MountainCarWrapper(gym.Wrapper):
             action = int(action.item())
         next_obs, env_reward, terminated, truncated, info = self.env.step(action)
 
-        # Force termination when goal is reached (fixes Gym/SB3 compatibility)
         if next_obs[0] >= 0.5:
             terminated = True
             
 
-        # Inject custom reward
         reward = self.reward_fn(
             obs=self._prev_obs,
             action=action,
@@ -69,12 +66,10 @@ class MountainCarWrapper(gym.Wrapper):
         info["step"] = self._step_count
         info["episode_num"] = self._episode_count
         info["env_reward"] = env_reward
-        # For MountainCar-v0, `terminated` corresponds to reaching the goal.
         info["reached_goal"] = bool(terminated)
 
         return next_obs, reward, terminated, truncated, info
 
-    # Convenience
 
     @property
     def obs_dim(self) -> int:

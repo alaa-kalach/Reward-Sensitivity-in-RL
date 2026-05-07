@@ -2,12 +2,6 @@
 logger.py
 Centralized CSV logging for all 9 experiments.
 
-One Logger instance per experiment run. Writes one row per episode.
-Tracks all four evaluation metrics in real time during training:
-  - Learning speed      : episode when 10-window average first hits threshold
-  - Final performance   : average reward over the last 100 episodes
-  - Success rate        : tracked per episode, computed over eval episodes post-training
-  - Training stability  : variance over the last 100 episodes (computed at close)
 """
 
 import csv
@@ -20,40 +14,39 @@ from typing import Optional
 
 
 LOGS_DIR              = "logs"
-PERFORMANCE_THRESHOLD = -110.0  # learning speed: 10-window avg must reach this
-WINDOW_SIZE           = 10      # rolling window for learning speed detection
-FINAL_WINDOW          = 100     # last N episodes for final performance + stability
+PERFORMANCE_THRESHOLD = -110.0  
+WINDOW_SIZE           = 10      
+FINAL_WINDOW          = 100     
 
 
-# Episode record - one CSV row
 
 @dataclass
 class EpisodeRecord:
 
-    # Experiment identity
+
     algorithm:    str
     reward_fn:    str
     seed:         int
     run_id:       str
 
-    # Progress
+  
     episode:      int
     total_steps:  int
 
-    # Raw episode outcome
+
     episode_steps:  int
     episode_reward: float
     env_reward_sum: float
     reached_goal:   bool
 
-    # Rolling metric snapshot
+    
     rolling_avg_10:   float
     learning_reached: bool
 
     wall_time: float = field(default_factory=time.time)
 
 
-# Logger
+
 
 class ExperimentLogger:
 
@@ -93,19 +86,19 @@ class ExperimentLogger:
         self._threshold_crossed = False
         self._first_goal_episode: Optional[int] = None
 
-        # Rolling buffers
-        self._window_10 = deque(maxlen=WINDOW_SIZE)   # learning speed detection
-        self._last_100  = deque(maxlen=FINAL_WINDOW)  # final performance + stability
+       
+        self._window_10 = deque(maxlen=WINDOW_SIZE)   
+        self._last_100  = deque(maxlen=FINAL_WINDOW) 
 
-        # Metric results — populated during logging or at close()
-        self.learning_speed:    Optional[int]   = None  # episode #, or None = failed
+
+        self.learning_speed:    Optional[int]   = None  
         self.final_performance: Optional[float] = None
-        self.stability:         Optional[float] = None  # variance across seeds
-        self.eval_success_rate: Optional[float] = None  # % set after eval
+        self.stability:         Optional[float] = None  
+        self.eval_success_rate: Optional[float] = None 
 
         print(f"[Logger] {self.run_id}  →  {filepath}")
 
-    # Core logging
+
 
     def log(self, record: EpisodeRecord) -> None:
 
@@ -114,22 +107,22 @@ class ExperimentLogger:
         record.total_steps   = self._total_steps
         record.wall_time     = round(time.time() - self._start_time, 3)
 
-        # Update rolling buffers with ground-truth env reward
+        
         self._window_10.append(record.env_reward_sum)
         self._last_100.append(record.env_reward_sum)
 
-        # Compute and attach rolling average to the record
+        
         rolling_avg = float(np.mean(self._window_10))
         record.rolling_avg_10 = round(rolling_avg, 4)
 
-        # Learning speed: first episode where full 10-window avg >= threshold
+        
         if (not self._threshold_crossed
                 and len(self._window_10) == WINDOW_SIZE
                 and rolling_avg >= PERFORMANCE_THRESHOLD):
             self.learning_speed     = self._episode_count
             self._threshold_crossed = True
 
-        # Track first episode the goal was ever reached (for learned_slow label)
+        
         if self._first_goal_episode is None and record.reached_goal:
             self._first_goal_episode = self._episode_count
 
@@ -138,7 +131,7 @@ class ExperimentLogger:
         self._writer.writerow(asdict(record))
         self._file.flush()
 
-    # Success rate (set after post-training evaluation)
+    # Success rate 
 
     def record_eval_success_rate(self, successes: int, total_eval_episodes: int) -> None:
         self.eval_success_rate = round(successes / total_eval_episodes * 100, 2)
@@ -159,17 +152,17 @@ class ExperimentLogger:
             "algorithm":          self.algorithm,
             "reward_fn":          self.reward_fn,
             "seed":               self.seed,
-            # Metric 1 - Learning speed
+    
             "learning_speed": (
                 self.learning_speed if self.learning_speed
                 else f"learned_slow({self._first_goal_episode})" if (self.eval_success_rate or 0) > 0
                 else "failed"
             ),
-            # Metric 2 - Final performance
+      
             "final_performance":  self.final_performance,
-            # Metric 3 - Success rate (None until eval is run)
+            
             "eval_success_rate":  self.eval_success_rate,
-            # Metric 4 - Training stability
+
             "stability_variance": self.stability,
         }
 
@@ -186,19 +179,19 @@ class ExperimentLogger:
     def _write_summary(self, summary: dict) -> None:
         summary_path = os.path.join(self._logs_dir, "summary.csv")
 
-        # Load existing rows if file exists
+   
         existing_rows = []
         if os.path.exists(summary_path):
             with open(summary_path, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 existing_rows = [
                     row for row in reader
-                    if row["run_id"] != self.run_id  # drop old version of this run
+                    if row["run_id"] != self.run_id 
                 ]
 
-        existing_rows.append(summary)  # add the fresh row
+        existing_rows.append(summary)  
 
-        with open(summary_path, "w", newline="") as f:  # overwrite cleanly
+        with open(summary_path, "w", newline="") as f: 
             writer = csv.DictWriter(f, fieldnames=list(summary.keys()))
             writer.writeheader()
             writer.writerows(existing_rows)

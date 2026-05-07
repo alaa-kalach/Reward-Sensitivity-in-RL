@@ -1,18 +1,11 @@
 """
 reward_functions.py
 Defines the three reward functions used across all 9 experiments.
-
-Each function follows the unified signature expected by MountainCarWrapper:
-    reward_fn(obs, action, next_obs, done, env_reward) -> float
-
-MountainCar-v0 state space:
-    obs[0] : position   in [-1.2,  0.6]   (goal: >= 0.5)
-    obs[1] : velocity   in [-0.07, 0.07]
 """
 
 import numpy as np
 
-# Goal threshold matches the environment's internal termination condition
+
 GOAL_POSITION: float = 0.5
 
 
@@ -29,16 +22,16 @@ def dense_reward(
     pos, vel       = float(obs[0]), float(obs[1])
     next_pos, nvel = float(next_obs[0]), float(next_obs[1])
 
-    # Reward progress to the right (potential-like but simpler/stronger signal).
+  
     progress_reward = (next_pos - pos) * 10.0
 
-    # Small momentum term to encourage building speed without dominating.
+
     speed_reward = abs(nvel) * 0.5
 
-    # One-time goal bonus to strongly prefer termination by success.
+    
     goal_bonus = 50.0 if next_pos >= GOAL_POSITION else 0.0
 
-    # Combine with true environment reward (-1 per step) to keep incentives aligned.
+ 
     return float(env_reward) + progress_reward + speed_reward + goal_bonus
 
 
@@ -55,7 +48,7 @@ def sparse_reward(
     return 1.0 if next_obs[0] >= GOAL_POSITION else 0.0
 
 
-# 3. Potential-Based Reward  (theory: Ng et al., 1999)
+# 3. Potential-Based Reward  
 
 def _potential(obs: np.ndarray) -> float:
     position = obs[0]

@@ -2,40 +2,7 @@
 plot.py
 Standalone plotting script. Run this after all (or some) experiments are done.
 
-Generates four figure types, all saved to logs/plots/:
-
-  1. learning_curves_<ALGO>.png
-     One figure per algorithm. Three subplots (one per reward function),
-     each overlaying the 10-episode rolling average for all seeds.
-     → Answers: "How does reward design shape this algorithm's learning?"
-     → Mirrors: Reward Sensitivity axis.
-
-  2. algo_comparison_<REWARD>.png
-     One figure per reward function. Three subplots (one per algorithm),
-     each overlaying all seeds.
-     → Answers: "Do algorithms differ under the same reward?"
-     → Mirrors: Algorithm Sensitivity axis.
-
-  3. final_performance_bars.png
-     Grouped bar chart of seed-averaged final performance for every
-     (algorithm, reward) pair. One group per algorithm, one bar per
-     reward function.
-     → Answers: "Which combination performs best overall?"
-
-  4. stability_heatmap.png
-     Heatmap of training stability variance for each (algorithm, reward) pair.
-     → Answers: "Which conditions are most sensitive to random initialisation?"
-
-Partial results are handled gracefully — any run whose CSV is missing is
-skipped with a warning rather than crashing. This lets you plot after only
-one or two algorithms are complete.
-
-Usage
------
-    python plot.py                        # uses logs/ and saves to logs/plots/
-    python plot.py --logs-dir my_logs     # custom logs directory
-    python plot.py --algorithms PPO DQN   # plot only specific algorithms
-    python plot.py --no-show              # save only, never open windows
+Generates four figure types, all saved to logs/plots
 """
 
 import argparse
