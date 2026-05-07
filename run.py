@@ -47,6 +47,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 from environment import MountainCarWrapper
 from reward_functions import REWARD_REGISTRY, get_reward_fn
+from noise_injection import dense_noisy, sparse_noisy
+from reward_curriculum import CurriculumReward
 from logger import make_logger, EpisodeRecord
 from metrics import compute_sensitivity_analysis
 
@@ -59,6 +61,14 @@ DEFAULT_SEEDS  = [42, 123, 456]
 N_EPISODES     = 5000
 EVAL_EPISODES  = 100        # post-training evaluation episodes per condition
 MAX_STEPS      = 200        # MountainCar-v0 max steps per episode
+
+# Extended reward variants available from the CLI.
+EXTENDED_REWARDS = {
+    "dense_noisy": dense_noisy,
+    "sparse_noisy": sparse_noisy,
+}
+SPECIAL_REWARDS = {"curriculum"}
+AVAILABLE_REWARD_NAMES = list(REWARD_REGISTRY.keys()) + list(EXTENDED_REWARDS.keys()) + list(SPECIAL_REWARDS)
 
 
 # -----------------------------------------------------------------------
@@ -92,14 +102,14 @@ HYPERPARAMS = {
         policy         = "MlpPolicy",
     ),
     "DQN": dict(
-        learning_rate        = 1e-4,
-        batch_size           = 64,
+        learning_rate        = 5e-5,
+        batch_size           = 128,
         gamma                = 0.99,
         buffer_size          = 50_000,
         learning_starts      = 1000,
         target_update_interval = 500,
-        exploration_fraction = 0.3,   # longer exploration helps under sparse reward
-        exploration_final_eps = 0.05,
+        exploration_fraction = 0.5,   # longer exploration helps under sparse reward
+        exploration_final_eps = 0.01,
         train_freq           = 4,
         policy               = "MlpPolicy",
     ),
@@ -120,12 +130,13 @@ class LoggerCallback(BaseCallback):
     required for the reward sensitivity analysis.
     """
 
-    def __init__(self, logger, algorithm: str, reward_fn_name: str, seed: int):
+    def __init__(self, logger, algorithm: str, reward_fn_name: str, seed: int, curriculum_reward=None):
         super().__init__(verbose=0)
         self._logger        = logger
         self._algorithm     = algorithm
         self._reward_fn_name = reward_fn_name
         self._seed          = seed
+        self._curriculum_reward = curriculum_reward
 
         # Per-episode accumulators
         self._ep_shaped    = 0.0
@@ -149,6 +160,9 @@ class LoggerCallback(BaseCallback):
 
         if done:
             self._ep_count += 1
+            if self._curriculum_reward is not None:
+                # Advance dense->sparse interpolation once per finished episode.
+                self._curriculum_reward.update(self._ep_count)
             self._logger.log(EpisodeRecord(
                 algorithm        = self._algorithm,
                 reward_fn        = self._reward_fn_name,
@@ -224,7 +238,13 @@ def train_one_condition(
 
     Writes one CSV to logs/ and appends/updates one row in logs/summary.csv.
     """
-    reward_fn  = get_reward_fn(reward_name)
+    curriculum_reward = CurriculumReward() if reward_name == "curriculum" else None
+    if curriculum_reward is not None:
+        reward_fn = curriculum_reward
+    elif reward_name in EXTENDED_REWARDS:
+        reward_fn = EXTENDED_REWARDS[reward_name]
+    else:
+        reward_fn = get_reward_fn(reward_name)
     env        = MountainCarWrapper(reward_fn=reward_fn, seed=seed)
     logger     = make_logger(algorithm=algorithm, reward_fn=reward_name, seed=seed)
     total_steps = n_episodes * MAX_STEPS   # budget in steps for model.learn()
@@ -234,7 +254,7 @@ def train_one_condition(
 
     # ---- Training ----
     model    = make_model(algorithm, env, seed)
-    callback = LoggerCallback(logger, algorithm, reward_name, seed)
+    callback = LoggerCallback(logger, algorithm, reward_name, seed, curriculum_reward=curriculum_reward)
     model.learn(total_timesteps=total_steps, callback=callback, reset_num_timesteps=True)
 
     # ---- Post-training evaluation ----
@@ -267,14 +287,16 @@ def train_one_condition(
 # Run all 9 conditions for one algorithm
 # -----------------------------------------------------------------------
 
-def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int]) -> None:
-    n_conditions = len(seeds) * len(REWARD_REGISTRY)
+def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int], rewards: list[str] = None) -> None:
+    rewards_to_run = rewards if rewards is not None else AVAILABLE_REWARD_NAMES
+    n_conditions   = len(seeds) * len(rewards_to_run)
 
     print("=" * 65)
     print(f"  ALGORITHM : {algorithm}")
     print(f"  Conditions: {n_conditions}  "
-          f"({len(seeds)} seeds × {len(REWARD_REGISTRY)} reward functions)")
+          f"({len(seeds)} seeds × {len(rewards_to_run)} reward functions)")
     print(f"  Episodes  : {n_episodes} per condition")
+    print(f"  Rewards   : {rewards_to_run}")
     print(f"  Seeds     : {seeds}")
     print(f"  Eval eps  : {EVAL_EPISODES} per condition (post-training)")
     print(f"  Metrics   : learning_speed | final_performance | "
@@ -285,7 +307,7 @@ def run_algorithm(algorithm: str, n_episodes: int, seeds: list[int]) -> None:
         print(f"\n{'─' * 65}")
         print(f"  Seed {seed}")
         print(f"{'─' * 65}")
-        for reward_name in REWARD_REGISTRY:
+        for reward_name in rewards_to_run:
             train_one_condition(
                 algorithm   = algorithm,
                 reward_name = reward_name,
@@ -395,6 +417,12 @@ def main():
         "--seeds", type=int, nargs="+", default=DEFAULT_SEEDS,
         help="Random seeds (default: 42 123 456)"
     )
+    parser.add_argument(
+        "--rewards", nargs="+", default=None,
+        choices=AVAILABLE_REWARD_NAMES,
+        help="Which reward conditions to run (default: all). "
+             "Example: --rewards dense_noisy sparse_noisy"
+    )
     args = parser.parse_args()
 
     if args.episodes <= 100:
@@ -408,6 +436,7 @@ def main():
         algorithm  = args.algorithm,
         n_episodes = args.episodes,
         seeds      = args.seeds,
+        rewards    = args.rewards,
     )
 
     run_report(algorithm=args.algorithm)

@@ -64,6 +64,8 @@ ALGO_COLORS      = ["#7E57C2", "#FFA726", "#66BB6A"]   # purple / amber / green
 PLOTS_DIR        = os.path.join("logs", "plots")
 LOGS_DIR         = "logs"
 
+THRESHOLD: float = -110.0   # MountainCar-v0 success threshold
+
 
 # -----------------------------------------------------------------------
 # CSV helpers
@@ -152,8 +154,8 @@ def plot_learning_curves(
                         linewidth=1.5, label=f"seed {seed}")
                 plotted = True
 
-            ax.axhline(-90, color="red", linestyle="--",
-                       linewidth=0.9, label="threshold (−90)")
+            ax.axhline(THRESHOLD, color="red", linestyle="--",
+                       linewidth=0.9, label=f"threshold ({THRESHOLD:.0f})")
             ax.set_title(reward_name, fontsize=10)
             ax.set_xlabel("Episode")
             if ax is axes[0]:
@@ -210,8 +212,8 @@ def plot_algo_comparison(
                         linewidth=1.5, label=f"seed {seed}")
                 plotted = True
 
-            ax.axhline(-90, color="red", linestyle="--",
-                       linewidth=0.9, label="threshold (−90)")
+            ax.axhline(THRESHOLD, color="red", linestyle="--",
+                       linewidth=0.9, label=f"threshold ({THRESHOLD:.0f})")
             ax.set_title(algo, fontsize=10)
             ax.set_xlabel("Episode")
             if ax is axes[0]:
@@ -288,12 +290,12 @@ def plot_final_performance_bars(
     ax.set_ylabel("Seed-Averaged Final Performance (env_reward)")
     ax.set_title(
         "Final Performance — All Conditions\n"
-        "(bars = seed-averaged mean; higher = better)",
+        "(bars = seed-averaged mean)",
         fontweight="bold",
     )
     ax.legend(title="Reward Function")
-    ax.axhline(-90, color="red", linestyle="--", linewidth=0.8,
-               label="learning threshold (−90)")
+    ax.axhline(THRESHOLD, color="red", linestyle="--", linewidth=0.8,
+               label=f"threshold ({THRESHOLD:.0f})")
     ax.grid(axis="y", alpha=0.3)
 
     plt.tight_layout()
@@ -348,7 +350,7 @@ def plot_stability_heatmap(
     ax.set_yticklabels(ALL_REWARD_NAMES)
     ax.set_title(
         "Training Stability — Variance Across Seeds\n"
-        "(darker = higher variance = less stable; grey = no data yet)",
+        "(darker = higher variance; grey = no data yet)",
         fontweight="bold",
     )
 
@@ -362,6 +364,135 @@ def plot_stability_heatmap(
 
     plt.tight_layout()
     _save(fig, os.path.join(plots_dir, "stability_heatmap.png"))
+
+
+# -----------------------------------------------------------------------
+# Figure 5 — Noise impact: clean vs noisy side by side per algorithm
+# -----------------------------------------------------------------------
+
+def plot_noise_comparison(
+    algorithms: list[str],
+    logs_dir:   str = LOGS_DIR,
+    plots_dir:  str = PLOTS_DIR,
+) -> None:
+    """
+    For each algorithm, shows final performance of dense vs dense_noisy
+    and sparse vs sparse_noisy as paired bars.
+
+    Answers: does noise hurt DQN more than PPO/A2C?
+    """
+    rows = _load_summary(logs_dir)
+    if not rows:
+        print("  [skip] summary.csv not found — skipping noise comparison.")
+        return
+
+    pairs = [("dense", "dense_noisy"), ("sparse", "sparse_noisy")]
+    pair_colors = [("#5C6BC0", "#9FA8DA"), ("#EF5350", "#EF9A9A")]
+
+    fig, axes = plt.subplots(1, len(algorithms), figsize=(5 * len(algorithms), 5), sharey=True)
+    if len(algorithms) == 1:
+        axes = [axes]
+
+    fig.suptitle(
+        "Noise Impact — Clean vs Noisy Reward\n"
+        "(seed-averaged final performance)",
+        fontsize=12, fontweight="bold",
+    )
+
+    # Aggregate seed averages
+    groups: dict = defaultdict(list)
+    for row in rows:
+        if row["final_performance"] is not None:
+            groups[(row["algorithm"], row["reward_fn"])].append(row["final_performance"])
+    seed_avgs = {k: float(np.mean(v)) for k, v in groups.items()}
+
+    for ax, algo in zip(axes, algorithms):
+        x      = np.arange(len(pairs))
+        width  = 0.35
+
+        for i, ((clean_name, noisy_name), (c_color, n_color)) in enumerate(zip(pairs, pair_colors)):
+            clean_val = seed_avgs.get((algo, clean_name), float("nan"))
+            noisy_val = seed_avgs.get((algo, noisy_name), float("nan"))
+
+            b1 = ax.bar(i - width / 2, clean_val, width, label=clean_name if algo == algorithms[0] else "",
+                        color=c_color, alpha=0.9, edgecolor="white")
+            b2 = ax.bar(i + width / 2, noisy_val, width, label=noisy_name if algo == algorithms[0] else "",
+                        color=n_color, alpha=0.9, edgecolor="white")
+
+            for bar, val in [(b1, clean_val), (b2, noisy_val)]:
+                if not np.isnan(val):
+                    ax.text(bar[0].get_x() + bar[0].get_width() / 2,
+                            bar[0].get_height() + 0.5,
+                            f"{val:.1f}", ha="center", va="bottom", fontsize=8)
+
+        ax.set_title(algo, fontsize=11, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(["dense pair", "sparse pair"], fontsize=9)
+        ax.set_xlabel("Reward Pair")
+        if ax is axes[0]:
+            ax.set_ylabel("Seed-Averaged Final Performance")
+        ax.axhline(THRESHOLD, color="red", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.grid(axis="y", alpha=0.3)
+
+    fig.legend(loc="upper right", fontsize=8, title="Reward variant")
+    plt.tight_layout()
+    _save(fig, os.path.join(plots_dir, "noise_comparison.png"))
+
+
+# -----------------------------------------------------------------------
+# Figure 6 — Curriculum schedule visualization
+# -----------------------------------------------------------------------
+
+def plot_curriculum_schedule(
+    n_episodes:     int   = 5000,
+    transition_end: int   = 2500,
+    plots_dir:      str   = PLOTS_DIR,
+) -> None:
+    """
+    Plots the alpha (interpolation weight) over episodes showing how the
+    curriculum transitions from dense to sparse reward.
+
+    This is a standalone visualization — no CSV data needed.
+    Useful for explaining the curriculum in presentations and the report.
+    """
+    episodes = np.arange(0, n_episodes + 1)
+    alpha    = np.minimum(episodes / transition_end, 1.0)
+    dense_w  = 1.0 - alpha
+    sparse_w = alpha
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+
+    ax.fill_between(episodes, dense_w,  alpha=0.25, color="#5C6BC0", label="Dense weight  (1 − α)")
+    ax.fill_between(episodes, sparse_w, alpha=0.25, color="#EF5350", label="Sparse weight  (α)")
+    ax.plot(episodes, dense_w,  color="#5C6BC0", linewidth=2)
+    ax.plot(episodes, sparse_w, color="#EF5350", linewidth=2)
+
+    ax.axvline(transition_end, color="grey", linestyle="--", linewidth=1.2,
+               label=f"Transition end (ep {transition_end})")
+
+    # Annotate key phases
+    ax.text(transition_end * 0.25, 0.55, "Dense phase\n(warm-start)",
+            ha="center", fontsize=9, color="#3949AB")
+    ax.text(transition_end * 0.75, 0.45, "Transition",
+            ha="center", fontsize=9, color="#555")
+    ax.text(transition_end + (n_episodes - transition_end) * 0.5, 0.55,
+            "Sparse phase\n(true objective)",
+            ha="center", fontsize=9, color="#C62828")
+
+    ax.set_xlim(0, n_episodes)
+    ax.set_ylim(-0.05, 1.15)
+    ax.set_xlabel("Training Episode", fontsize=10)
+    ax.set_ylabel("Interpolation Weight", fontsize=10)
+    ax.set_title(
+        "Curriculum Schedule — Linear Transition from Dense to Sparse\n"
+        r"$R_{curriculum} = (1 - \alpha) \cdot R_{dense} + \alpha \cdot R_{sparse}$",
+        fontsize=11, fontweight="bold",
+    )
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    _save(fig, os.path.join(plots_dir, "curriculum_schedule.png"))
 
 
 # -----------------------------------------------------------------------
@@ -423,14 +554,20 @@ def main():
     print("\n  [2/4] Algorithm comparison per reward function ...")
     plot_algo_comparison(args.algorithms, args.seeds, args.logs_dir, args.plots_dir)
 
-    print("\n  [3/4] Final performance bar chart ...")
+    print("\n  [3/6] Final performance bar chart ...")
     plot_final_performance_bars(args.algorithms, args.logs_dir, args.plots_dir)
 
-    print("\n  [4/4] Training stability heatmap ...")
+    print("\n  [4/6] Training stability heatmap ...")
     plot_stability_heatmap(args.algorithms, args.logs_dir, args.plots_dir)
 
+    print("\n  [5/6] Noise impact comparison ...")
+    plot_noise_comparison(args.algorithms, args.logs_dir, args.plots_dir)
+
+    print("\n  [6/6] Curriculum schedule visualization ...")
+    plot_curriculum_schedule(plots_dir=args.plots_dir)
+
     print("\n" + "=" * 65)
-    print(f"  All plots saved to {args.plots_dir}/")
+    print(f"  All 6 plots saved to {args.plots_dir}/")
     print("=" * 65 + "\n")
 
 

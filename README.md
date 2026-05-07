@@ -5,98 +5,117 @@
 
 ## Project Overview
 
-This project studies how three reinforcement learning algorithms — PPO, DQN, and A2C — respond to three different reward function designs on the MountainCar-v0 environment. The central question is whether an algorithm's performance is driven more by the algorithm itself or by how the reward signal is engineered.
+This project studies how three reinforcement learning algorithms — **PPO**, **DQN**, and **A2C** — respond to reward design on **MountainCar-v0** (Gymnasium). The core question is whether performance is driven more by the algorithm or by how the reward signal is engineered.
 
-The project is split into two phases. Phase 1 (complete) builds the shared infrastructure: the environment, reward functions, logging, and analysis pipeline. Phase 2 (upcoming) plugs in the three trained agents and produces the final results.
+Implementations use **[Stable-Baselines3](https://stable-baselines3.readthedocs.io/)** directly in `run.py`, with hyperparameters fixed per algorithm across all reward conditions so differences reflect **reward sensitivity**, not incidental tuning.
 
-Each of the three team members runs experiments independently for their own algorithm (9 experiments each: 3 reward functions × 3 seeds), with results aggregated into a shared `logs/` directory for cross-algorithm analysis.
+Experiments write per-run CSVs and a consolidated `logs/summary.csv`; `plot.py` produces figures for learning curves, cross-algorithm comparisons, stability, noise ablations, and the curriculum schedule.
 
 ---
 
 ## Research Design
 
-**Environment:** MountainCar-v0 (OpenAI Gymnasium)
-A car starts at the bottom of a valley and must reach a flag on the right hill. The engine is too weak to drive straight up — the agent must learn to swing left first to build momentum. This makes it a classic hard-exploration problem and an ideal testbed for studying reward sensitivity.
+**Environment:** MountainCar-v0 ([Gymnasium](https://gymnasium.farama.org/))
 
-**State space:** position ∈ [-1.2, 0.6], velocity ∈ [-0.07, 0.07]
-**Action space:** 3 discrete actions — push left, no-op, push right
-**Goal:** position ≥ 0.5
+A car starts at the bottom of a valley and must reach a flag on the right hill. The engine is too weak to drive straight up — the agent must learn to swing left first to build momentum. This is a classic hard-exploration problem and a practical testbed for reward sensitivity.
 
-**Total runs:** 27 — 3 algorithms × 3 reward functions × 3 random seeds
+**State space:** position ∈ [-1.2, 0.6], velocity ∈ [-0.07, 0.07]  
+**Action space:** 3 discrete actions — push left, no-op, push right  
+**Goal:** position ≥ 0.5  
+
+**Classic factorial (paper-style core):** 3 algorithms × 3 base reward shapes × 3 seeds = **27 runs** (when restricting to `dense`, `sparse`, `potential_based`).  
+
+The default CLI runs **six** reward conditions (below), i.e. 6 × 3 seeds = **18 runs per algorithm**. Use `--rewards dense sparse potential_based` to match the classic 9 runs per algorithm.
 
 ---
 
-## Algorithms (Phase 2)
+## Algorithms
 
-Each algorithm is implemented by one team member in its own agent file under `agents/`. The training loop, logging, and evaluation pipeline in `run.py` are shared and unchanged across all three.
+All three algorithms are trained via SB3 (`model.learn`) with a custom callback (`LoggerCallback`) that logs **one row per episode** using the raw environment reward in `info["env_reward"]` as the comparison scale, regardless of shaped reward during training.
 
-| Algorithm | Type | Key characteristic | Agent file |
-|---|---|---|---|
-| PPO | On-policy, actor-critic | Clipped surrogate objective, stable updates | `agents/ppo.py` |
-| DQN | Off-policy, value-based | Replay buffer, target network | `agents/dqn.py` |
-| A2C | On-policy, actor-critic | Synchronous n-step updates, simpler than PPO | `agents/a2c.py` |
+| Algorithm | Type | Notes |
+|-----------|------|--------|
+| PPO | On-policy actor-critic | Clipped surrogate, tuned `n_steps`, GAE |
+| DQN | Off-policy value-based | Replay buffer, target network, longer exploration fraction for sparse rewards |
+| A2C | On-policy actor-critic | Synchronous updates, simpler than PPO |
 
-All three algorithms use neural networks to learn policies and value functions from the raw (position, velocity) state. The reward signal directly shapes the gradient updates flowing through these networks, which is why reward design has such a significant impact on convergence behavior and final performance.
+Hyperparameters live in `HYPERPARAMS` in ```80:116:run.py``` and are **not** switched per reward type.
 
 ---
 
 ## Reward Functions
 
-All three functions share the unified signature expected by `MountainCarWrapper`:
+All callables share the signature expected by `MountainCarWrapper`:
 
 ```
 reward_fn(obs, action, next_obs, done, env_reward) -> float
 ```
 
-### 1. Dense
-Provides a continuous shaped signal on every step. Designed to guide the agent without waiting for goal discovery.
+### Core registry (`reward_functions.py`)
 
-```
-reward = (position_gain × 100) + (speed_bonus × 10) − 0.01 + goal_bonus
-```
+**1. Dense** — dense progress and momentum shaping on top of true step cost:
 
-- `position_gain`: difference in position between steps, scaled by 100
-- `speed_bonus`: absolute velocity × 10, encouraging momentum
-- `step_penalty`: −0.01 per step to discourage unnecessary exploration
-- `goal_bonus`: +10.0 one-time reward on reaching the goal
+- `progress_reward = (next_pos − pos) × 10`
+- `speed_reward = |next_velocity| × 0.5`
+- `goal_bonus = 50` when the goal position is reached
+- Returns **`env_reward` + shaping** so incentives stay aligned with the environment’s −1-per-step penalty
 
-### 2. Sparse
-Binary signal. +1 when the goal is reached, 0 everywhere else. The agent receives no intermediate feedback, making this the hardest exploration challenge and the purest test of an algorithm's intrinsic exploration capability.
+**2. Sparse** — binary signal: **`1.0`** if `next_obs[0] ≥ 0.5`, else **`0.0`** (hard exploration).
 
-```
-reward = 1.0 if position >= 0.5 else 0.0
-```
+**3. Potential-based** (Ng et al., 1999) — **`env_reward + γ·Φ(s′) − Φ(s)`** with `γ = 0.99`,  
+`Φ(s) = (position + 0.5 × velocity²) × 10`  
+(policy-invariant shaping up to rescaling conventions used here).
 
-### 3. Potential-Based
-Theoretically grounded shaping based on Ng et al. (1999). The shaping term `F(s, s') = γ·Φ(s') − Φ(s)` is added on top of the original environment reward. This is guaranteed not to change the optimal policy (policy invariance), making it the most principled design.
+Registered names: `dense`, `sparse`, `potential_based`.
 
-```
-Φ(s) = position + 0.5 × velocity²
-reward = env_reward + (0.99 × Φ(s') − Φ(s))
+### Extensions
+
+**Gaussian noise (`noise_injection.py`)**
+
+- **`dense_noisy`** / **`sparse_noisy`** — same as dense/sparse plus **ε ~ 𝒩(0, σ)** (`NOISE_SIGMA = 0.1`).
+- Potential-based is **not** given a noisy variant in code: small typical magnitudes would make fixed σ disproportionately distort the signal.
+
+**Dense → sparse curriculum (`reward_curriculum.py`)**
+
+- **`curriculum`** — linear mix  
+  **`R = (1 − α)·R_dense + α·R_sparse`** with **`α = min(episode / TRANSITION_END, 1)`**.
+- **`TRANSITION_END`** is **6500** episodes in code; **default training is `N_EPISODES = 5000`**, so **α reaches ~0.77** unless you train longer or change `TRANSITION_END`. The schedule advances once per finished episode inside `LoggerCallback`.
+
+### Choosing conditions at runtime
+
+```bash
+# Classic 9 runs per algorithm (3 rewards × 3 seeds)
+python run.py --algorithm PPO --rewards dense sparse potential_based
+
+# Only noisy comparisons
+python run.py --algorithm DQN --rewards dense_noisy sparse_noisy
+
+# Default: all six names (dense, sparse, potential_based, dense_noisy, sparse_noisy, curriculum)
+python run.py --algorithm A2C
 ```
 
 ---
 
 ## Evaluation Metrics
 
-All four metrics use the raw environment reward (`env_reward`) as the ground truth, regardless of which reward function the agent was trained on. This ensures fair comparison across all 27 runs.
+Metrics use **`env_reward` (sum per episode)** as **ground truth** for learning speed and final performance, independent of shaped training reward.
 
-| Metric | Definition |
-|---|---|
-| **Learning speed** | Episode number when the 10-episode rolling average of env_reward first reaches ≥ −90. Recorded as `failed` if never reached within the episode budget. |
-| **Final performance** | Mean env_reward over the last 100 training episodes. |
-| **Success rate** | Percentage of 100 post-training evaluation episodes where the agent reached the goal (2% resolution per episode). |
-| **Training stability** | Variance of final_performance across the 3 random seeds for each (algorithm, reward) condition. High variance = unstable training. |
+**Learning speed** — defined in ```24:26:logger.py``` using a **10-episode rolling mean** of `env_reward_sum` and threshold **`PERFORMANCE_THRESHOLD = -110`**. Stored in `summary.csv` as:
 
----
+- an episode number once the threshold is first met;
+- or **`learned_slow(N)`** if the threshold was never met but post-training evaluation still shows goal success (`eval_success_rate > 0`), with **`N`** the first training episode where the goal was reached;
+- or **`failed`** if appropriate.
 
-## Sensitivity Analyses
+**Final performance** — mean `env_reward_sum` over the **last 100** training episodes (variance over that window is **`stability_variance`** in `summary.csv`).
 
-**Reward Sensitivity** — per algorithm: variance in seed-averaged final performance across its 3 reward conditions. High variance means that algorithm is sensitive to reward design.
+**Eval success rate** — percentage of **100** deterministic post-training episodes that reach the goal.
 
-**Algorithm Sensitivity** — per reward function: variance in seed-averaged final performance across its 3 algorithms. High variance means that reward type strongly differentiates algorithm behavior.
+Cross-run **training stability** in reports aggregates **final performance across seeds** per `(algorithm, reward_fn)`.
 
-Both analyses operate on seed-averaged values to isolate reward/algorithm effects from random initialization noise.
+**Sensitivity summaries** (`metrics.py`):
+
+- **Reward sensitivity** — per algorithm: variance in seed-averaged final performance across reward conditions present in `summary.csv`.
+- **Algorithm sensitivity** — per reward: variance across algorithms.
 
 ---
 
@@ -104,19 +123,19 @@ Both analyses operate on seed-averaged values to isolate reward/algorithm effect
 
 ```
 project/
-├── environment.py       # MountainCarWrapper — seeding, reward injection, step tracking
-├── reward_functions.py  # dense, sparse, potential_based + REWARD_REGISTRY
-├── logger.py            # Per-run CSV logging + summary.csv aggregation
-├── metrics.py           # Sensitivity analysis computed from summary.csv
-├── run.py               # Per-algorithm entry point (one member runs this per algorithm)
-├── plot.py              # Standalone plotting script — run after experiments are done
+├── environment.py        # MountainCarWrapper — Gymnasium wrapper, shaped reward injection, info dict
+├── reward_functions.py   # dense, sparse, potential_based + REWARD_REGISTRY
+├── noise_injection.py    # Gaussian wrapper; dense_noisy, sparse_noisy
+├── reward_curriculum.py  # CurriculumReward (dense→sparse interpolation)
+├── logger.py               # Per-run CSV + summary.csv aggregation
+├── metrics.py              # Sensitivity analysis from summary.csv
+├── run.py                  # SB3 training + evaluation + per-algorithm report
+├── plot.py                 # Figures from logs/
 │
 ├── logs/
-│   ├── PPO_dense_seed42.csv          # one file per run (27 total)
-│   ├── PPO_dense_seed123.csv
-│   ├── ...
-│   └── summary.csv                   # one row per run, all four metrics
-│   └── plots/                        # generated by plot.py
+│   ├── <ALGO>_<reward>_seed<SEED>.csv   # one per condition
+│   ├── summary.csv
+│   └── plots/
 │       ├── learning_curves_PPO.png
 │       ├── learning_curves_DQN.png
 │       ├── learning_curves_A2C.png
@@ -124,110 +143,76 @@ project/
 │       ├── algo_comparison_sparse.png
 │       ├── algo_comparison_potential_based.png
 │       ├── final_performance_bars.png
-│       └── stability_heatmap.png
+│       ├── stability_heatmap.png
+│       ├── noise_comparison.png           # dense vs dense_noisy, sparse vs sparse_noisy (from summary)
+│       └── curriculum_schedule.png        # schematic α schedule + formula
 │
-└── agents/                           # Phase 2 — one file per team member
-    ├── ppo.py                        # Person 1: network architecture + _get_action()
-    ├── dqn.py                        # Person 2: network architecture + _get_action()
-    └── a2c.py                        # Person 3: network architecture + _get_action()
+└── README.md
 ```
 
 ---
 
 ## CSV Format
 
-Each per-run CSV (`logs/<run_id>.csv`) has one row per episode:
+Each per-run CSV row is one episode. Main columns:
 
 | Column | Description |
-|---|---|
-| `run_id` | Unique identifier e.g. `PPO_dense_seed42` |
-| `algorithm` | PPO, DQN, or A2C |
-| `reward_fn` | dense, sparse, or potential_based |
-| `seed` | 42, 123, or 456 |
-| `episode` | Episode number within this run |
-| `total_steps` | Cumulative environment steps so far |
-| `episode_steps` | Steps taken in this episode |
-| `episode_reward` | Sum of shaped reward the algorithm received |
-| `env_reward_sum` | Sum of raw env reward (ground truth) |
-| `reached_goal` | Whether the car reached position ≥ 0.5 |
-| `rolling_avg_10` | 10-episode rolling average of env_reward_sum |
-| `learning_reached` | True from the episode the −90 threshold was first crossed |
-| `wall_time` | Seconds elapsed since run start |
+|--------|-------------|
+| `run_id` | e.g. `PPO_dense_seed42` |
+| `algorithm` | PPO, DQN, A2C |
+| `reward_fn` | Reward name (`dense`, `sparse`, `potential_based`, `dense_noisy`, `sparse_noisy`, `curriculum`) |
+| `seed` | e.g. 42, 123, 456 |
+| `episode` | Episode index |
+| `total_steps` | Cumulative env steps |
+| `episode_reward` | Sum of **shaped** reward seen by the learner |
+| `env_reward_sum` | Sum of **raw** MountainCar reward (metric scale) |
+| `reached_goal` | Goal reached this episode |
+| `rolling_avg_10` | 10-episode rolling mean of `env_reward_sum` |
+| `learning_reached` | True after the −110 threshold is first crossed (see `logger.py`) |
+| `wall_time` | Seconds since run start |
 
-The shared `logs/summary.csv` has one row per run with the four final metrics: `learning_speed`, `final_performance`, `eval_success_rate`, `stability_variance`.
+`logs/summary.csv` adds **`learning_speed`**, **`final_performance`**, **`eval_success_rate`**, **`stability_variance`**.
 
 ---
 
 ## How to Run
 
-**Install dependencies:**
+**Install dependencies**
+
 ```bash
 pip install gymnasium stable-baselines3 numpy matplotlib
 ```
 
-### Phase 1 — Infrastructure validation (random policy)
-
-Each team member runs their own algorithm independently:
+**Training (one algorithm)**
 
 ```bash
-# Person 1
 python run.py --algorithm PPO
-
-# Person 2
-python run.py --algorithm DQN
-
-# Person 3
-python run.py --algorithm A2C
+python run.py --algorithm DQN --episodes 5000
+python run.py --algorithm A2C --seeds 42 123 456
 ```
 
-**Optional flags:**
-```bash
-python run.py --algorithm PPO --episodes 500     # override episode count
-python run.py --algorithm PPO --seeds 42         # run a single seed only
-python run.py --algorithm PPO --seeds 42 123 456 --episodes 1000
-```
-
-After training, a per-algorithm results report is printed automatically showing all four metrics for the 9 completed runs.
-
-### Phase 2 — Trained agents
-
-Each member implements their agent in `agents/<algorithm>.py` and replaces the `_get_action()` stub in `run.py`:
-
-```python
-# In run.py — the only line that changes for Phase 2
-def _get_action(algorithm: str, obs: np.ndarray, env: MountainCarWrapper) -> int:
-    # Phase 1 (random policy):
-    return env.action_space.sample()
-
-    # Phase 2 example (replace with trained agent):
-    # from agents.ppo import PPOAgent
-    # return PPOAgent.load("checkpoints/ppo_final.zip").predict(obs)[0]
-```
-
-The environment wrapper, reward functions, logger, and metrics pipeline remain completely unchanged between phases.
-
-### Plotting (run after experiments are complete)
+**Useful flags**
 
 ```bash
-# After all three algorithms are done
+python run.py --algorithm PPO --rewards dense sparse potential_based   # classic 27-run study across all algos
+python run.py --algorithm PPO --episodes 7000                           # closer to full curriculum if using curriculum reward
+python run.py --algorithm PPO --seeds 42                                # quick smoke run
+```
+
+If `--episodes` is ≤ 100, `run.py` prints a warning: final averages and variance use fewer than 100 episodes.
+
+**Plotting**
+
+```bash
 python plot.py
-
-# After only one algorithm is done (partial results handled gracefully)
-python plot.py --algorithms PPO
-
-# Custom logs directory
-python plot.py --logs-dir shared/logs
+python plot.py --algorithms PPO DQN --logs-dir logs --plots-dir logs/plots
 ```
 
-`plot.py` generates four figure types saved to `logs/plots/`:
-- **Learning curves per algorithm** — mirrors the Reward Sensitivity axis
-- **Algorithm comparison per reward function** — mirrors the Algorithm Sensitivity axis
-- **Final performance bar chart** — seed-averaged results across all conditions
-- **Training stability heatmap** — variance across seeds per (algorithm, reward) condition
+Figures save with matplotlib’s Agg backend (`plot.py`), so no display is required for file output.
 
-Missing runs are shown as greyed-out placeholders rather than crashing, so you can plot incrementally as each team member finishes.
+The first four figures use the **three base** rewards (`dense`, `sparse`, `potential_based`) for learning curves and algorithm grids. **`noise_comparison.png`** needs summary rows that include **`dense`** / **`dense_noisy`** and **`sparse`** / **`sparse_noisy`**. **`curriculum_schedule.png`** is a standalone diagram (no CSV required).
 
-### Run the sensitivity analysis report standalone
+**Standalone metrics**
 
 ```bash
 python metrics.py
@@ -235,33 +220,22 @@ python metrics.py
 
 ---
 
-## Episode Budget
+## Episode Budget & Evaluation
 
-| Constant | Value | Rationale |
-|---|---|---|
-| `N_EPISODES` | 5000 | Sparse reward needs ~800–1000 episodes to converge; dense and potential-based converge earlier. 5000 gives all three reward functions a fair budget. |
-| `EVAL_EPISODES` | 100 | 1% resolution per episode. Sufficient to reliably rank conditions without adding meaningful runtime overhead (~2% of training). |
+| Constant | Default | Role |
+|---------|---------|------|
+| `N_EPISODES` | 5000 | Training episodes per `(algorithm, reward, seed)` |
+| `EVAL_EPISODES` | 100 | Post-training deterministic eval episodes for success rate |
+| `MAX_STEPS` | 200 | Gym time limit per MountainCar episode (step budget passed to SB3 via total timesteps) |
 
 ---
 
 ## Seeds
 
-Three fixed seeds are used: `[42, 123, 456]`. Each seed initializes both the environment and the policy network, producing distinct but reproducible training trajectories. Variance in final performance across seeds is how training stability is measured.
+Default seeds **`[42, 123, 456]`** fix environment and SB3 RNGs for repeatable runs. **Training stability** compares outcomes across seeds for the same `(algorithm, reward_fn)`.
 
 ---
 
-## Current Status
+## Status
 
-**Phase 1 — Complete**
-- Environment wrapper with seeding and reward injection
-- Three reward functions (dense, sparse, potential-based)
-- Full metric tracking and CSV logging across all 9 runs per algorithm
-- Per-algorithm sensitivity report printed automatically after training
-- Standalone `plot.py` with four figure types, partial-results aware
-
-**Phase 2 — In progress**
-- Person 1: PPO agent (`agents/ppo.py`)
-- Person 2: DQN agent (`agents/dqn.py`)
-- Person 3: A2C agent (`agents/a2c.py`)
-
-Phase 2 replaces the random policy stub in `run.py` with trained neural network agents. Everything else — the environment wrapper, reward functions, logger, metrics pipeline, and plotting — remains unchanged.
+Infrastructure and RL training (**Stable-Baselines3**) are implemented end-to-end: shaped rewards, noisy variants, optional curriculum, logging, metrics, reporting, and plotting (including noise and curriculum figures). Tune `--rewards`, `--episodes`, and **`TRANSITION_END`** in `reward_curriculum.py` when you want the classic 27-run factorial, longer runs for sparse convergence, or a curriculum that reaches α = 1 within the training horizon.

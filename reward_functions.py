@@ -88,7 +88,7 @@ def _potential(obs: np.ndarray) -> float:
     """
     position = obs[0]
     velocity = obs[1]
-    return (position + 0.5 * (velocity ** 2)) * 10.0   # energy-inspired shaping
+    return (position + 0.5 * (velocity ** 2)) * 10.0    # energy-inspired shaping
 
 
 def potential_based_reward(
